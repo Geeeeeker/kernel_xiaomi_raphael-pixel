@@ -41,7 +41,7 @@ jobs:
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
-          git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r487747c/-/tree/14.0?ref_type=heads.git /home/runner/r487747c --depth=1
+          git clone --branch 14.0 https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r487747c.git /home/runner/r487747c --depth=1
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         id: cache-clang-save

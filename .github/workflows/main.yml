@@ -29,8 +29,8 @@ jobs:
         id: restore-clang
         uses: actions/cache/restore@v4
         with:
-          path: /home/runner/r487747c
-          key: clang-r487747c
+          path: /home/runner/r450784
+          key: clang-r450784
 
       - name: Install build dependencies
         run: |
@@ -41,18 +41,18 @@ jobs:
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
-          git clone https://github.com/kmou424/proton-clang-11.git /home/runner/r487747c --depth=1
+          git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r450784.git /home/runner/r450784 --depth=1
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         id: cache-clang-save
         uses: actions/cache/save@v4
         with:
-          path: /home/runner/r487747c
-          key: clang-r487747c
+          path: /home/runner/r450784
+          key: clang-r450784
 
       - name: Build the kernel with `ccache`
         run: |
-          export CLANG_PATH=$HOME/r487747c/bin
+          export CLANG_PATH=$HOME/r450784/bin
           export PATH=${CLANG_PATH}:${PATH}
           
           # Use ccache explicitly

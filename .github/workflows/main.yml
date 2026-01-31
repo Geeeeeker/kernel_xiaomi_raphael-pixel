@@ -56,8 +56,8 @@ jobs:
           export PATH=${CLANG_PATH}:${PATH}
           
           # Use ccache explicitly
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig KCFLAGS="-ftrivial-auto-var-init=zero -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang"
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo) KCFLAGS="-ftrivial-auto-var-init=zero -enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang"
           # Show ccache stats after build
           ccache --show-stats
           ccache --show-config

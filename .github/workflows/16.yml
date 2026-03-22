@@ -1,0 +1,112 @@
+name: Continues testing
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 允许创建 Release 和上传资产
+    env:
+      KBUILD_BUILD_USER: NATO66613
+      KBUILD_BUILD_HOST: KREMLIN
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          create-symlink: true
+          key: kernel-build-cache
+          restore-keys: |
+            kernel-build-cache
+          max-size: '10G'
+
+      - name: Restore toolchain cache
+        id: restore-clang
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/r547379
+          key: clang-r547379
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
+          ccache --show-stats
+
+      - name: Deploy Clang
+        if: steps.restore-clang.outputs.cache-hit != 'true'
+        run: |
+          git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
+
+      - name: Save clang
+        if: steps.restore-clang.outputs.cache-hit != 'true'
+        id: cache-clang-save
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/r547379
+          key: clang-r547379
+
+      - name: Build the kernel with `ccache`
+        id: build
+        run: |
+          export CLANG_PATH=$HOME/r547379/bin
+          export PATH=${CLANG_PATH}:${PATH}
+          
+          # 使用 ccache 构建
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
+
+          # 显示 ccache 统计
+          ccache --show-stats
+          ccache --show-config
+
+          # 提取设备代号（包名）和 Android 内核版本
+          DEVICE=$(echo "raphael_defconfig" | sed 's/_defconfig//')   # 从 defconfig 文件名提取
+          echo "DEVICE=$DEVICE" >> $GITHUB_ENV
+
+          KERNEL_VERSION=$(make kernelversion | cut -d. -f1-2)   # 取主版本号，如 4.19
+          echo "KERNEL_VERSION=$KERNEL_VERSION" >> $GITHUB_ENV
+
+      - name: Repack Kernel Artifacts
+        run: |
+          git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
+          cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
+          cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
+
+          # 生成新的 ZIP 名称
+          ZIP_NAME="AnyKernel3-${DEVICE}-${KERNEL_VERSION}.zip"
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+
+          # 将 AnyKernel3 目录移动到工作空间并打包
+          mv "$HOME/AnyKernel3" "$GITHUB_WORKSPACE/AnyKernel3"
+          cd "$GITHUB_WORKSPACE/AnyKernel3"
+          zip -r "../$ZIP_NAME" ./*
+
+          # 验证打包结果
+          ls -lah "$GITHUB_WORKSPACE/$ZIP_NAME"
+        shell: bash
+
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ github.workspace }}/${{ env.ZIP_NAME }}
+
+      - name: Create Release and Upload Asset
+        if: startsWith(github.ref, 'refs/tags/')   # 仅在推送标签时执行
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ env.ZIP_NAME }}
+          body: |
+            Automated kernel build for ${{ env.DEVICE }} (Android ${{ env.KERNEL_VERSION }})
+          files: ${{ github.workspace }}/${{ env.ZIP_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

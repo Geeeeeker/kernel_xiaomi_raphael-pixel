@@ -176,40 +176,36 @@ jobs:
           ccache --show-config
         shell: bash
 
-      # ========== 编译 USB/IP 模块（使用输出目录） ==========
+      # ========== 编译 USB/IP 内核模块（使用 O=out） ==========
       - name: Build USB/IP kernel modules
-        working-directory: kernel/out
+        working-directory: kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
 
-          # 清理旧的 USB/IP 产物（在输出目录中）
-          echo "=== Cleaning USB/IP modules in out directory ==="
-          find . -path "*/usbip/*" -name "*.o" -delete
-          find . -path "*/usbip/*" -name "*.ko" -delete
-          find . -path "*/usbip/*" -name "*.cmd" -delete
-          find . -path "*/usbip/*" -name "*.mod" -delete
-          rm -f drivers/usb/usbip/.tmp_versions/*
+          # 清理旧的 USB/IP 产物
+          echo "=== Cleaning USB/IP modules ==="
+          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip clean
 
           # 确认 .config 存在
-          echo "=== Checking .config ==="
-          ls -la .config || exit 1
+          echo "=== Checking .config in out ==="
+          ls -la out/.config || exit 1
 
           # 打印 USB/IP 配置
           echo "=== USB/IP config ==="
-          grep "CONFIG_USBIP" .config || echo "None found"
+          grep "CONFIG_USBIP" out/.config || echo "None found"
 
-          # 编译 USB/IP 模块（使用 M= 相对路径指向源码）
+          # 编译 USB/IP 模块
           echo "=== Building USB/IP modules ==="
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=../drivers/usb/usbip modules -B V=1 || {
+          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules -B V=1 || {
             echo "ERROR: USB/IP modules compilation failed"
             exit 1
           }
 
           # 检查生成的 .ko 文件
           echo "=== Checking generated .ko files ==="
-          find . -name '*.ko' | grep -i usbip || echo "No .ko files found"
-          if ! find . -name '*.ko' | grep -q -i usbip; then
+          find out -name '*.ko' | grep -i usbip || echo "No .ko files found"
+          if ! find out -name '*.ko' | grep -q -i usbip; then
             echo "ERROR: USB/IP modules not built."
             exit 1
           fi
@@ -219,7 +215,6 @@ jobs:
         run: |
           mkdir -p usbip_output/modules
           echo "Looking for USB/IP kernel modules..."
-          # 在 out 目录中查找
           find kernel/out -name '*.ko' | grep -i usbip || true
           find kernel/out -name '*.ko' | grep -i usbip | xargs -I {} cp {} usbip_output/modules/ || true
           if [ -z "$(ls -A usbip_output/modules/)" ]; then

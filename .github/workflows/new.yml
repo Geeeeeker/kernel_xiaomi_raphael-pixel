@@ -11,13 +11,10 @@ jobs:
       KBUILD_BUILD_USER: NATO66613
       KBUILD_BUILD_HOST: KREMLIN
     steps:
-      - name: Clone kernel source
-        uses: actions/checkout@v4
-        with:
-          repository: Geeeeeker/kernel_xiaomi_raphael-pixel
-          ref: 16.0
-          path: kernel
-          fetch-depth: 1
+      # 替换为手动 git clone 避免 checkout 动作的分支解析错误
+      - name: Clone kernel source manually
+        run: |
+          git clone --depth=1 -b 16.0 https://github.com/Geeeeeker/kernel_xiaomi_raphael-pixel.git kernel
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -54,7 +51,7 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # ========== 新增 Docker/LXC 支持配置步骤 ==========
+      # Docker/LXC 支持配置
       - name: 配置 LXC 和 Docker 支持
         working-directory: kernel
         run: |
@@ -120,7 +117,6 @@ jobs:
           fi
           COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
           ZIP_NAME="${BRANCH}-${COMMIT_HASH}.zip"
-          # 确保环境变量值不包含换行符或多余空格
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           
           mv "$HOME/AnyKernel3" "$GITHUB_WORKSPACE/AnyKernel3"

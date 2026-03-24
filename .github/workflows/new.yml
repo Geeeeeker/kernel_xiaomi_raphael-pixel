@@ -39,7 +39,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
+          sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools lld
           ccache --show-stats
 
       - name: Deploy Clang
@@ -197,6 +197,11 @@ jobs:
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
+          # 确保 ld.lld 可用（系统已通过 apt install lld 安装）
+          if ! command -v ld.lld &> /dev/null; then
+            echo "ld.lld still not found, installing again..."
+            sudo apt-get update && sudo apt-get install -y lld
+          fi
 
           # 彻底清理 USB/IP 产物（在 out 目录）
           echo "=== Cleaning USB/IP modules ==="
@@ -204,11 +209,11 @@ jobs:
           rm -rf out/drivers/usb/usbip/*.ko
           rm -rf out/drivers/usb/usbip/*.cmd
           rm -rf out/drivers/usb/usbip/.tmp_versions
-          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip clean
+          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" LD=ld.lld M=drivers/usb/usbip clean
 
           # 编译 USB/IP 模块
           echo "=== Building USB/IP modules ==="
-          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules -B V=1 || {
+          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" LD=ld.lld M=drivers/usb/usbip modules -B V=1 || {
             echo "ERROR: USB/IP modules compilation failed"
             exit 1
           }

@@ -19,6 +19,7 @@ jobs:
       - name: Clone kernel source manually
         run: |
           git clone --depth=1 -b 16.0 https://github.com/Geeeeeker/kernel_xiaomi_raphael-pixel.git kernel
+
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -39,11 +40,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
+          # 新增：USB/IP 交叉编译依赖
+          sudo apt-get install -y autoconf libtool pkg-config libudev-dev:arm64 libssl-dev:arm64 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
           ccache --show-stats
+
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
+
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         id: cache-clang-save
@@ -52,12 +57,12 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      - name: Configure kernel options (LXC/Docker + user defined)
+      - name: Configure kernel options (LXC/Docker + user defined + USB/IP)
         working-directory: kernel
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
-          
-          # 2. 添加用户提供的所有 CONFIG_* 项
+
+          # 追加用户提供的 CONFIG_* 项（原有内容）
           cat << EOF >> $DEFCONFIG
           CONFIG_UPROBE_EVENTS=y
           CONFIG_KPROBE_EVENTS=y
@@ -144,35 +149,132 @@ jobs:
           CONFIG_IP_VS_RR=y
           CONFIG_SECURITY_APPARMOR=y
           EOF
-          # 修正 SYSVIPC 相关选项
+
+          # 修正 SYSVIPC
           sed -i '/CONFIG_SYSVIPC/d' $DEFCONFIG
           sed -i '/CONFIG_SYSVIPC_SYSCTL/d' $DEFCONFIG
           sed -i '/CONFIG_SYSVIPC_COMPAT/d' $DEFCONFIG
           echo "CONFIG_SYSVIPC=y" >> $DEFCONFIG
           echo "CONFIG_SYSVIPC_SYSCTL=y" >> $DEFCONFIG
           echo "CONFIG_SYSVIPC_COMPAT=y" >> $DEFCONFIG
+
           # 设置 LOCALVERSION
           sed -i '/CONFIG_LOCALVERSION/d' $DEFCONFIG
           echo 'CONFIG_LOCALVERSION="-Geeeeeker-perf"' >> $DEFCONFIG
+
       - name: Build the kernel with ccache
         working-directory: kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
-          
+
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
-          
+
           ccache --show-stats
           ccache --show-config
         shell: bash
 
+      # ========== 新增：编译 USB/IP 模块和用户态工具 ==========
+      - name: Build USB/IP kernel modules and userspace tools (cross-compile)
+        working-directory: kernel
+        run: |
+          # 确保 USB/IP 配置已生效（已在上面添加）
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
+
+          # 编译 USB/IP 内核模块
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules
+
+          # 编译用户态工具
+          cd tools/usb/usbip
+          ./autogen.sh
+          ./configure --host=aarch64-linux-gnu \
+                      CFLAGS="-Wno-error -Wno-error=stringop-truncation" \
+                      --with-tcp-wrappers=no
+          make -j$(nproc)
+
+          # 创建输出目录
+          mkdir -p $GITHUB_WORKSPACE/usbip_output/{bin,libs,modules}
+
+          # 复制内核模块
+          find ../../drivers/usb/usbip -name '*.ko' -exec cp {} $GITHUB_WORKSPACE/usbip_output/modules/ \;
+
+          # 复制用户态二进制
+          cp src/.libs/usbip $GITHUB_WORKSPACE/usbip_output/bin/
+          cp src/.libs/usbipd $GITHUB_WORKSPACE/usbip_output/bin/
+
+          # 复制 libusbip.so 库
+          cp libsrc/.libs/libusbip.so.0* $GITHUB_WORKSPACE/usbip_output/libs/
+
+          # 收集动态库依赖
+          cd $GITHUB_WORKSPACE/usbip_output
+          BINARIES="bin/usbip bin/usbipd libs/libusbip.so.0*"
+          DEPS=""
+
+          for file in $BINARIES; do
+            if [ -f "$file" ]; then
+              echo "Collecting dependencies for $file..."
+              needed=$(aarch64-linux-gnu-readelf -d "$file" | grep NEEDED | awk '{print $5}' | tr -d '[]' || true)
+              for lib in $needed; do
+                if [[ "$DEPS" != *"$lib"* ]]; then
+                  DEPS="$DEPS $lib"
+                fi
+              done
+            fi
+          done
+
+          # 去重并复制库文件
+          for lib in $(echo $DEPS | tr ' ' '\n' | sort -u); do
+            echo "Searching for library: $lib"
+            # 优先从交叉编译 sysroot 中查找
+            libpath=$(find /usr/aarch64-linux-gnu/lib -name "$lib" -type f 2>/dev/null | head -1)
+            if [ -z "$libpath" ]; then
+              libpath=$(find /usr/lib/aarch64-linux-gnu -name "$lib" -type f 2>/dev/null | head -1)
+            fi
+            if [ -z "$libpath" ]; then
+              libpath=$(find /lib/aarch64-linux-gnu -name "$lib" -type f 2>/dev/null | head -1)
+            fi
+            if [ -n "$libpath" ]; then
+              echo "Found: $libpath"
+              cp -P "$libpath" libs/ 2>/dev/null || cp "$libpath" libs/
+              # 同时复制可能的符号链接
+              for reallib in $(find "$(dirname "$libpath")" -name "${lib%.so*}*" -type f 2>/dev/null); do
+                cp -n "$reallib" libs/ 2>/dev/null || true
+              done
+            else
+              echo "Warning: library $lib not found"
+            fi
+          done
+
+          # 确保 ld-linux 被复制
+          ld_linux="/usr/aarch64-linux-gnu/lib/ld-linux-aarch64.so.1"
+          if [ -f "$ld_linux" ]; then
+            cp -P "$ld_linux" libs/
+          fi
+
+          echo "USB/IP build and collection complete."
+        shell: bash
+
+      - name: Package USB/IP artifacts
+        run: |
+          cd usbip_output
+          tar czf ../usbip-arm64-bundle-with-modules.tar.gz .
+          cd ..
+
+      - name: Upload USB/IP bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: usbip-arm64-with-modules-and-deps
+          path: usbip-arm64-bundle-with-modules.tar.gz
+
+      # ========== 原有打包步骤（修复路径） ==========
       - name: Repack Kernel Artifacts
         id: pack
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
-          cp kernel/out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
-          cp kernel/out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
+          # 修正路径：内核镜像实际位于 kernel/arch/arm64/boot/
+          cp kernel/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
+          cp kernel/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
           DEVICE="raphael"
           ANDROID_VER="16.0"
           ZIP_NAME="anykernel3-${DEVICE}-${ANDROID_VER}.zip"
@@ -183,6 +285,7 @@ jobs:
           zip -r9 ${ZIP_NAME} * -x .git README.md *placeholder
           mv ${ZIP_NAME} $GITHUB_WORKSPACE/
           cd $GITHUB_WORKSPACE
+
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -198,7 +301,9 @@ jobs:
           body: |
             Kernel for ${{ env.DEVICE }} (Android ${{ env.ANDROID_VER }})
             Built from commit ${{ github.sha }}
-          files: ${{ github.workspace }}/${{ env.ZIP_NAME }}
+          files: |
+            ${{ github.workspace }}/${{ env.ZIP_NAME }}
+            ${{ github.workspace }}/usbip-arm64-bundle-with-modules.tar.gz
           draft: false
           prerelease: false
         env:

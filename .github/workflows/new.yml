@@ -131,6 +131,7 @@ jobs:
           CONFIG_USB_COMMON=y
           CONFIG_USB_ARCH_HAS_HCD=y
           CONFIG_USB_SUPPORT=y
+          CONFIG_MODULES=y
           CONFIG_USBIP_CORE=m
           CONFIG_USBIP_VHCI_HCD=m
           CONFIG_USBIP_HOST=m
@@ -176,17 +177,25 @@ jobs:
           ccache --show-config
         shell: bash
 
-      # ========== 强制将 USB/IP 配置改为模块 ==========
-      - name: Force USB/IP config to modules
+      # ========== 强制启用模块支持并将 USB/IP 设为模块 ==========
+      - name: Force CONFIG_MODULES=y and USB/IP as modules
         working-directory: kernel
         run: |
-          # 修改 out/.config 将 USBIP 相关选项从 =y 改为 =m
+          # 确保 CONFIG_MODULES=y
+          sed -i 's/# CONFIG_MODULES is not set/CONFIG_MODULES=y/' out/.config
+          # 确保 USBIP 为 m
           sed -i 's/CONFIG_USBIP_CORE=y/CONFIG_USBIP_CORE=m/' out/.config
           sed -i 's/CONFIG_USBIP_VHCI_HCD=y/CONFIG_USBIP_VHCI_HCD=m/' out/.config
           sed -i 's/CONFIG_USBIP_HOST=y/CONFIG_USBIP_HOST=m/' out/.config
-          # 确认修改
-          grep "CONFIG_USBIP" out/.config
-          # 同步配置并更新头文件
+          # 删除可能存在的禁用行
+          sed -i '/^# CONFIG_USBIP_CORE is not set/d' out/.config
+          sed -i '/^# CONFIG_USBIP_VHCI_HCD is not set/d' out/.config
+          sed -i '/^# CONFIG_USBIP_HOST is not set/d' out/.config
+
+          # 验证
+          grep -E "CONFIG_MODULES|CONFIG_USBIP" out/.config
+
+          # 重新运行 olddefconfig 和 prepare
           make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
           make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" prepare
           make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" scripts
@@ -197,28 +206,19 @@ jobs:
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
-          # 确保 ld.lld 可用（系统已通过 apt install lld 安装）
           if ! command -v ld.lld &> /dev/null; then
-            echo "ld.lld still not found, installing again..."
             sudo apt-get update && sudo apt-get install -y lld
           fi
 
-          # 彻底清理 USB/IP 产物（在 out 目录）
-          echo "=== Cleaning USB/IP modules ==="
-          rm -rf out/drivers/usb/usbip/*.o
-          rm -rf out/drivers/usb/usbip/*.ko
-          rm -rf out/drivers/usb/usbip/*.cmd
-          rm -rf out/drivers/usb/usbip/.tmp_versions
-          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" LD=ld.lld M=drivers/usb/usbip clean
+          echo "=== USBIP config from out/.config ==="
+          grep CONFIG_USBIP out/.config || true
 
-          # 编译 USB/IP 模块
           echo "=== Building USB/IP modules ==="
           make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" LD=ld.lld M=drivers/usb/usbip modules -B V=1 || {
             echo "ERROR: USB/IP modules compilation failed"
             exit 1
           }
 
-          # 检查生成的 .ko 文件
           echo "=== Checking generated .ko files ==="
           find out -name '*.ko' | grep -i usbip || echo "No .ko files found"
           if ! find out -name '*.ko' | grep -q -i usbip; then
@@ -230,8 +230,6 @@ jobs:
       - name: Collect USB/IP kernel modules
         run: |
           mkdir -p usbip_output/modules
-          echo "Looking for USB/IP kernel modules..."
-          find kernel/out -name '*.ko' | grep -i usbip || true
           find kernel/out -name '*.ko' | grep -i usbip | xargs -I {} cp {} usbip_output/modules/ || true
           if [ -z "$(ls -A usbip_output/modules/)" ]; then
             echo "ERROR: No USB/IP kernel modules found!"
@@ -257,7 +255,6 @@ jobs:
               set -e
               export DEBIAN_FRONTEND=noninteractive
 
-              # 安装编译依赖（Ubuntu 24.04 自带 GCC 13）
               apt update
               apt install -y \
                 build-essential \
@@ -280,19 +277,16 @@ jobs:
                 --with-tcp-wrappers=no
               make -j\$(nproc)
 
-              # 复制二进制和库
               cp src/.libs/usbip /workspace/usbip_output/bin/
               cp src/.libs/usbipd /workspace/usbip_output/bin/
               cp libsrc/.libs/libusbip.so.0* /workspace/usbip_output/libs/
 
-              # 收集动态库依赖
               cd /workspace/usbip_output
               BINARIES=\"bin/usbip bin/usbipd libs/libusbip.so.0*\"
               DEPS=\"\"
 
               for file in \$BINARIES; do
                 if [ -f \"\$file\" ]; then
-                  echo \"Collecting dependencies for \$file...\"
                   needed=\$(readelf -d \"\$file\" | grep NEEDED | awk '{print \$5}' | tr -d '[]' || true)
                   for lib in \$needed; do
                     if [[ \"\$DEPS\" != *\"\$lib\"* ]]; then
@@ -302,29 +296,22 @@ jobs:
                 fi
               done
 
-              # 去重并复制库文件
               for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
-                echo \"Searching for library: \$lib\"
                 libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1)
                 if [ -n \"\$libpath\" ]; then
-                  echo \"Found: \$libpath\"
                   cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
-                  # 复制可能的符号链接
                   for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
                     cp -n \"\$reallib\" libs/ 2>/dev/null || true
                   done
-                else
-                  echo \"Warning: library \$lib not found\"
                 fi
               done
 
-              # 确保 ld-linux 被复制
               ld_linux=\"/lib/ld-linux-aarch64.so.1\"
               if [ -f \"\$ld_linux\" ]; then
                 cp -P \"\$ld_linux\" libs/
               fi
 
-              echo \"USB/IP userspace tools build and collection complete.\"
+              echo \"USB/IP userspace tools build complete.\"
             "
 
       - name: Package USB/IP artifacts
@@ -339,11 +326,10 @@ jobs:
           name: usbip-arm64-with-modules-and-deps
           path: usbip-arm64-bundle-with-modules.tar.gz
 
-      # ========== 打包内核刷写包（AnyKernel3） ==========
+      # ========== 打包内核刷写包 ==========
       - name: Repack Kernel Artifacts
         id: pack
         run: |
-          # 查找生成的镜像文件（在 out 目录中）
           IMAGE=$(find kernel/out/arch/arm64/boot -name "Image.gz-dtb" -o -name "Image" | head -1)
           if [ -z "$IMAGE" ]; then
             echo "ERROR: No kernel image found in kernel/out/arch/arm64/boot/"

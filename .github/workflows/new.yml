@@ -18,7 +18,8 @@ jobs:
     steps:
       - name: Clone kernel source manually
         run: |
-          git clone --depth=1 -b 16.0 https://github.com/Geeeeeker/kernel_xiaomi_raphael-pixel.git kernel
+          # 直接克隆到当前目录（与原始工作流一致）
+          git clone --depth=1 -b 16.0 https://github.com/Geeeeeker/kernel_xiaomi_raphael-pixel.git .
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -56,7 +57,6 @@ jobs:
           key: clang-r547379
 
       - name: Configure kernel options (LXC/Docker + user defined + USB/IP as modules)
-        working-directory: kernel
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
 
@@ -161,28 +161,56 @@ jobs:
           echo 'CONFIG_LOCALVERSION="-Geeeeeker-perf"' >> $DEFCONFIG
 
       - name: Build the kernel with ccache
-        working-directory: kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
 
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
+          # 规范化配置
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
+          # 诊断 USB/IP 配置
+          echo "=== USB/IP config in .config ==="
+          grep -E "CONFIG_USBIP_CORE|CONFIG_USBIP_VHCI_HCD|CONFIG_USBIP_HOST" .config || echo "USB/IP options not found!"
+
+          # 编译内核和所有模块
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
 
-          # 显式生成所需的镜像文件
+          # 生成刷写所需的镜像（根据原始工作流，输出在 out/ 下？但我们未指定 O=out，可能输出在 arch/arm64/boot/）
+          # 为了兼容，尝试生成到 out/ 目录，但先不改变构建方式，后续通过查找确定实际位置。
+          # 原始工作流使用 out/arch/arm64/boot/，因此我们假设构建系统已配置输出到 out/。
+          # 为了保险，先构建镜像，然后查找实际位置。
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
 
           ccache --show-stats
           ccache --show-config
         shell: bash
 
-      # ========== 提取 USB/IP 内核模块（主机已编译） ==========
+      # 诊断：查找生成的镜像文件
+      - name: Locate kernel images
+        run: |
+          echo "Searching for Image.gz-dtb..."
+          find . -name "Image.gz-dtb" -type f
+          echo "Searching for dtbo.img..."
+          find . -name "dtbo.img" -type f
+          echo "Searching for .ko files (USB/IP):"
+          find . -name "usbip*.ko" -o -name "vhci-hcd.ko" -o -name "usbip-core.ko" | head -10
+
+      # ========== 提取 USB/IP 内核模块 ==========
       - name: Collect USB/IP kernel modules
         run: |
           mkdir -p usbip_output/modules
-          find kernel/drivers/usb/usbip -name '*.ko' -exec cp {} usbip_output/modules/ \;
-          echo "USB/IP kernel modules collected:"
-          ls -l usbip_output/modules/
+          # 查找所有 USB/IP 相关的 .ko 文件
+          find . -path "*/drivers/usb/usbip/*.ko" -o -name "usbip*.ko" -o -name "vhci-hcd.ko" -o -name "usbip-core.ko" 2>/dev/null | while read mod; do
+            cp "$mod" usbip_output/modules/
+          done
+          if [ -z "$(ls -A usbip_output/modules/)" ]; then
+            echo "WARNING: No USB/IP kernel modules found!"
+            echo "Listing all .ko files for debugging:"
+            find . -name "*.ko" | head -20
+          else
+            echo "USB/IP kernel modules collected:"
+            ls -l usbip_output/modules/
+          fi
 
       # ========== 使用 Docker 容器编译 USB/IP 用户态工具（arm64） ==========
       - name: Set up QEMU for multi-arch
@@ -216,8 +244,8 @@ jobs:
                 file \
                 kmod
 
-              # 进入内核源码中的 usbip 工具目录
-              cd kernel/tools/usb/usbip
+              # 进入内核源码中的 usbip 工具目录（现在源码在工作区根目录）
+              cd tools/usb/usbip
 
               # 配置并编译
               ./autogen.sh
@@ -289,15 +317,36 @@ jobs:
       - name: Repack Kernel Artifacts
         id: pack
         run: |
-          # 检查镜像文件是否存在（使用更健壮的查找方式）
-          IMAGE=$(find kernel/arch/arm64/boot -name "Image.gz-dtb" -o -name "Image" | head -1)
+          # 首先尝试从 out/ 目录查找（原始工作流使用此路径）
+          IMAGE=""
+          if [ -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
+            IMAGE="out/arch/arm64/boot/Image.gz-dtb"
+          elif [ -f "arch/arm64/boot/Image.gz-dtb" ]; then
+            IMAGE="arch/arm64/boot/Image.gz-dtb"
+          else
+            # 通配符查找
+            IMAGE=$(find . -name "Image.gz-dtb" -type f | head -1)
+          fi
+
+          DTBO=""
+          if [ -f "out/arch/arm64/boot/dtbo.img" ]; then
+            DTBO="out/arch/arm64/boot/dtbo.img"
+          elif [ -f "arch/arm64/boot/dtbo.img" ]; then
+            DTBO="arch/arm64/boot/dtbo.img"
+          else
+            DTBO=$(find . -name "dtbo.img" -type f | head -1)
+          fi
+
           if [ -z "$IMAGE" ]; then
-            echo "ERROR: No kernel image found! Looked for Image.gz-dtb or Image."
+            echo "ERROR: No kernel image found!"
+            echo "Search results:"
+            find . -name "Image*" -type f
             exit 1
           fi
-          DTBO=$(find kernel/arch/arm64/boot -name "dtbo.img" | head -1)
           if [ -z "$DTBO" ]; then
             echo "ERROR: dtbo.img not found!"
+            echo "Search results:"
+            find . -name "dtbo.img" -type f
             exit 1
           fi
 

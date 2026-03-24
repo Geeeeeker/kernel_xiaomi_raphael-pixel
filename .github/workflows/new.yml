@@ -1,4 +1,4 @@
-name: Continues testing usbip
+name: Continues testing
 
 on:
   push:
@@ -18,8 +18,7 @@ jobs:
     steps:
       - name: Clone kernel source manually
         run: |
-          # 直接克隆到当前目录（与原始工作流一致）
-          git clone --depth=1 -b 16.0 https://github.com/Geeeeeker/kernel_xiaomi_raphael-pixel.git .
+          git clone --depth=1 -b 16.0 https://github.com/Geeeeeker/kernel_xiaomi_raphael-pixel.git kernel
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -57,10 +56,15 @@ jobs:
           key: clang-r547379
 
       - name: Configure kernel options (LXC/Docker + user defined + USB/IP as modules)
+        working-directory: kernel
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
 
-          # 追加用户提供的 CONFIG_* 项，USB/IP 设为模块（=m）
+          # 先删除可能存在的旧定义，再追加新的（避免重复）
+          for opt in SYSVIPC SYSVIPC_SYSCTL SYSVIPC_COMPAT LOCALVERSION USBIP_CORE USBIP_VHCI_HCD USBIP_HOST; do
+            sed -i "/^#\?CONFIG_$opt/d" $DEFCONFIG
+          done
+
           cat << EOF >> $DEFCONFIG
           CONFIG_UPROBE_EVENTS=y
           CONFIG_KPROBE_EVENTS=y
@@ -148,69 +152,42 @@ jobs:
           CONFIG_SECURITY_APPARMOR=y
           EOF
 
-          # 修正 SYSVIPC
-          sed -i '/CONFIG_SYSVIPC/d' $DEFCONFIG
-          sed -i '/CONFIG_SYSVIPC_SYSCTL/d' $DEFCONFIG
-          sed -i '/CONFIG_SYSVIPC_COMPAT/d' $DEFCONFIG
-          echo "CONFIG_SYSVIPC=y" >> $DEFCONFIG
-          echo "CONFIG_SYSVIPC_SYSCTL=y" >> $DEFCONFIG
-          echo "CONFIG_SYSVIPC_COMPAT=y" >> $DEFCONFIG
-
           # 设置 LOCALVERSION
-          sed -i '/CONFIG_LOCALVERSION/d' $DEFCONFIG
           echo 'CONFIG_LOCALVERSION="-Geeeeeker-perf"' >> $DEFCONFIG
 
       - name: Build the kernel with ccache
+        working-directory: kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
 
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
-          # 规范化配置
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
-          # 诊断 USB/IP 配置
-          echo "=== USB/IP config in .config ==="
-          grep -E "CONFIG_USBIP_CORE|CONFIG_USBIP_VHCI_HCD|CONFIG_USBIP_HOST" .config || echo "USB/IP options not found!"
-
-          # 编译内核和所有模块
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
 
-          # 生成刷写所需的镜像（根据原始工作流，输出在 out/ 下？但我们未指定 O=out，可能输出在 arch/arm64/boot/）
-          # 为了兼容，尝试生成到 out/ 目录，但先不改变构建方式，后续通过查找确定实际位置。
-          # 原始工作流使用 out/arch/arm64/boot/，因此我们假设构建系统已配置输出到 out/。
-          # 为了保险，先构建镜像，然后查找实际位置。
+          # 显式生成需要的镜像文件
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
+
+          # 显式编译 USB/IP 模块（确保生成 .ko 文件）
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules
 
           ccache --show-stats
           ccache --show-config
         shell: bash
 
-      # 诊断：查找生成的镜像文件
-      - name: Locate kernel images
-        run: |
-          echo "Searching for Image.gz-dtb..."
-          find . -name "Image.gz-dtb" -type f
-          echo "Searching for dtbo.img..."
-          find . -name "dtbo.img" -type f
-          echo "Searching for .ko files (USB/IP):"
-          find . -name "usbip*.ko" -o -name "vhci-hcd.ko" -o -name "usbip-core.ko" | head -10
-
-      # ========== 提取 USB/IP 内核模块 ==========
+      # ========== 收集 USB/IP 内核模块 ==========
       - name: Collect USB/IP kernel modules
         run: |
           mkdir -p usbip_output/modules
-          # 查找所有 USB/IP 相关的 .ko 文件
-          find . -path "*/drivers/usb/usbip/*.ko" -o -name "usbip*.ko" -o -name "vhci-hcd.ko" -o -name "usbip-core.ko" 2>/dev/null | while read mod; do
-            cp "$mod" usbip_output/modules/
-          done
+          echo "Looking for USB/IP kernel modules..."
+          find kernel -name '*.ko' | grep usbip || true
+          # 收集 .ko 文件（可能位于 drivers/usb/usbip/ 或 modules 目录下）
+          find kernel/drivers/usb/usbip -name '*.ko' -exec cp {} usbip_output/modules/ \;
           if [ -z "$(ls -A usbip_output/modules/)" ]; then
-            echo "WARNING: No USB/IP kernel modules found!"
-            echo "Listing all .ko files for debugging:"
-            find . -name "*.ko" | head -20
-          else
-            echo "USB/IP kernel modules collected:"
-            ls -l usbip_output/modules/
+            echo "ERROR: No USB/IP kernel modules found!"
+            exit 1
           fi
+          echo "USB/IP kernel modules collected:"
+          ls -l usbip_output/modules/
 
       # ========== 使用 Docker 容器编译 USB/IP 用户态工具（arm64） ==========
       - name: Set up QEMU for multi-arch
@@ -219,17 +196,17 @@ jobs:
 
       - name: Build usbip userspace tools in arm64 container
         run: |
-          mkdir -p ${{ github.workspace }}/usbip_output/{bin,libs}
+          mkdir -p usbip_output/{bin,libs}
 
           docker run --rm --platform linux/arm64 \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
-            arm64v8/ubuntu:22.04 \
+            arm64v8/ubuntu:24.04 \
             bash -c "
               set -e
               export DEBIAN_FRONTEND=noninteractive
 
-              # 安装编译依赖
+              # 安装编译依赖（Ubuntu 24.04 自带 GCC 13）
               apt update
               apt install -y \
                 build-essential \
@@ -244,17 +221,15 @@ jobs:
                 file \
                 kmod
 
-              # 进入内核源码中的 usbip 工具目录（现在源码在工作区根目录）
-              cd tools/usb/usbip
+              cd kernel/tools/usb/usbip
 
-              # 配置并编译
               ./autogen.sh
               ./configure \
                 CFLAGS=\"-Wno-error -Wno-error=stringop-truncation\" \
                 --with-tcp-wrappers=no
               make -j\$(nproc)
 
-              # 复制二进制和库到输出目录
+              # 复制二进制和库
               cp src/.libs/usbip /workspace/usbip_output/bin/
               cp src/.libs/usbipd /workspace/usbip_output/bin/
               cp libsrc/.libs/libusbip.so.0* /workspace/usbip_output/libs/
@@ -283,7 +258,7 @@ jobs:
                 if [ -n \"\$libpath\" ]; then
                   echo \"Found: \$libpath\"
                   cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
-                  # 复制相关符号链接
+                  # 复制可能的符号链接
                   for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
                     cp -n \"\$reallib\" libs/ 2>/dev/null || true
                   done
@@ -317,41 +292,17 @@ jobs:
       - name: Repack Kernel Artifacts
         id: pack
         run: |
-          # 首先尝试从 out/ 目录查找（原始工作流使用此路径）
-          IMAGE=""
-          if [ -f "out/arch/arm64/boot/Image.gz-dtb" ]; then
-            IMAGE="out/arch/arm64/boot/Image.gz-dtb"
-          elif [ -f "arch/arm64/boot/Image.gz-dtb" ]; then
-            IMAGE="arch/arm64/boot/Image.gz-dtb"
-          else
-            # 通配符查找
-            IMAGE=$(find . -name "Image.gz-dtb" -type f | head -1)
-          fi
-
-          DTBO=""
-          if [ -f "out/arch/arm64/boot/dtbo.img" ]; then
-            DTBO="out/arch/arm64/boot/dtbo.img"
-          elif [ -f "arch/arm64/boot/dtbo.img" ]; then
-            DTBO="arch/arm64/boot/dtbo.img"
-          else
-            DTBO=$(find . -name "dtbo.img" -type f | head -1)
-          fi
-
+          # 查找生成的镜像文件（允许不同命名）
+          IMAGE=$(find kernel/arch/arm64/boot -name "Image.gz-dtb" -o -name "Image" | head -1)
           if [ -z "$IMAGE" ]; then
-            echo "ERROR: No kernel image found!"
-            echo "Search results:"
-            find . -name "Image*" -type f
+            echo "ERROR: No kernel image found in kernel/arch/arm64/boot/"
             exit 1
           fi
+          DTBO=$(find kernel/arch/arm64/boot -name "dtbo.img" | head -1)
           if [ -z "$DTBO" ]; then
-            echo "ERROR: dtbo.img not found!"
-            echo "Search results:"
-            find . -name "dtbo.img" -type f
+            echo "ERROR: dtbo.img not found in kernel/arch/arm64/boot/"
             exit 1
           fi
-
-          echo "Found kernel image: $IMAGE"
-          echo "Found dtbo: $DTBO"
 
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
           cp "$IMAGE" $HOME/AnyKernel3/Image.gz-dtb

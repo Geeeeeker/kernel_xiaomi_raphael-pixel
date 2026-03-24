@@ -56,35 +56,7 @@ jobs:
         working-directory: kernel
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
-          # 原有 LXC/Docker 支持配置
-          rm -rf utils
-          git clone https://github.com/tomxi1997/lxc-docker-support-for-android.git utils
-          sed -i '/select CFS_BANDWIDTH/d' utils/Kconfig
-          sed -i '/select DOCKER_STATISTICS/d' utils/Kconfig
-          sed -i '/select BLK_DEV_THROTTLING/d' utils/Kconfig
-          sed -i '/select CFQ_GROUP_IOSCHED/d' utils/Kconfig
-          sed -i '/select BRIDGE_VLAN_FILTERING/d' utils/Kconfig
-          echo 'source "utils/Kconfig"' >> "Kconfig"
-          echo "CONFIG_DOCKER=y" >> $DEFCONFIG
-          echo "# CONFIG_CFS_BANDWIDTH is not set" >> $DEFCONFIG
-          echo "# CONFIG_DOCKER_STATISTICS is not set" >> $DEFCONFIG
-          sed -i '/CONFIG_ANDROID_PARANOID_NETWORK/d' $DEFCONFIG
-          echo "# CONFIG_ANDROID_PARANOID_NETWORK is not set" >> $DEFCONFIG
-          echo "# CONFIG_BLK_DEV_THROTTLING is not set" >> $DEFCONFIG
-          echo "# CONFIG_CFQ_GROUP_IOSCHED is not set" >> $DEFCONFIG
-          sed -i '/sdm845-v2-qvr-evt.dtb/d' arch/arm64/boot/dts/qcom/Makefile
-          sed -i '/qvr/d' arch/arm64/boot/dts/qcom/Makefile
-          sed -i '/interposer/d' arch/arm64/boot/dts/qcom/Makefile
-          chmod +x utils/runcpatch.sh
-          if [ -f cgroup/cgroup.c ]; then
-              sh utils/runcpatch.sh cgroup/cgroup.c
-          fi
-          if [ -f cgroup.c ]; then
-              sh utils/runcpatch.sh cgroup.c
-          fi
-          if [ -f net/netfilter/xt_qtaguid.c ]; then
-              patch -p0 < utils/xt_qtaguid.patch
-          fi
+          
           # 2. 添加用户提供的所有 CONFIG_* 项
           cat << EOF >> $DEFCONFIG
           CONFIG_UPROBE_EVENTS=y

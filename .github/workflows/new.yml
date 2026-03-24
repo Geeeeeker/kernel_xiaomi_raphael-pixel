@@ -126,6 +126,11 @@ jobs:
           CONFIG_TMPFS=y
           CONFIG_TMPFS_POSIX_ACL=y
           CONFIG_TMPFS_XATTR=y
+          # USB 核心支持必须为 y，否则 USBIP 模块无法编译
+          CONFIG_USB=y
+          CONFIG_USB_COMMON=y
+          CONFIG_USB_ARCH_HAS_HCD=y
+          CONFIG_USB_SUPPORT=y
           CONFIG_USBIP_CORE=m
           CONFIG_USBIP_VHCI_HCD=m
           CONFIG_USBIP_HOST=m
@@ -164,22 +169,36 @@ jobs:
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
           echo "=== USB/IP config after defconfig ==="
           grep "CONFIG_USBIP" .config || true
+          grep "CONFIG_USB[^I]" .config | head -20 || true
 
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
           echo "=== USB/IP config after olddefconfig ==="
           grep "CONFIG_USBIP" .config || true
+          grep "CONFIG_USB[^I]" .config | head -20 || true
 
-          # 全量编译内核
+          # 全量编译内核（镜像和模块）
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
 
           # 显式生成所需的镜像文件
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
 
-          # 显式编译 USB/IP 模块（并显示详细日志）
+          # 准备模块编译环境
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" modules_prepare
+
+          # 显式编译 USB/IP 模块（显示详细输出）
           echo "=== Building USB/IP modules ==="
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules V=1
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules V=1 || {
+            echo "ERROR: USB/IP modules compilation failed"
+            exit 1
+          }
+
+          # 立即检查是否生成了 .ko 文件
           echo "=== Checking generated .ko files ==="
           find drivers/usb/usbip -name '*.ko' -ls || echo "No .ko files found"
+          if [ ! -f drivers/usb/usbip/usbip-core.ko ] && [ ! -f drivers/usb/usbip/vhci-hcd.ko ] && [ ! -f drivers/usb/usbip/usbip-host.ko ]; then
+            echo "ERROR: USB/IP modules not built. Check compilation errors above."
+            exit 1
+          fi
 
           ccache --show-stats
           ccache --show-config
@@ -253,4 +272,103 @@ jobs:
               for file in \$BINARIES; do
                 if [ -f \"\$file\" ]; then
                   echo \"Collecting dependencies for \$file...\"
-                  needed=\$(readelf -d \"\$file\" | grep NEEDED
+                  needed=\$(readelf -d \"\$file\" | grep NEEDED | awk '{print \$5}' | tr -d '[]' || true)
+                  for lib in \$needed; do
+                    if [[ \"\$DEPS\" != *\"\$lib\"* ]]; then
+                      DEPS=\"\$DEPS \$lib\"
+                    fi
+                  done
+                fi
+              done
+
+              # 去重并复制库文件
+              for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
+                echo \"Searching for library: \$lib\"
+                libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1)
+                if [ -n \"\$libpath\" ]; then
+                  echo \"Found: \$libpath\"
+                  cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
+                  # 复制可能的符号链接
+                  for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
+                    cp -n \"\$reallib\" libs/ 2>/dev/null || true
+                  done
+                else
+                  echo \"Warning: library \$lib not found\"
+                fi
+              done
+
+              # 确保 ld-linux 被复制
+              ld_linux=\"/lib/ld-linux-aarch64.so.1\"
+              if [ -f \"\$ld_linux\" ]; then
+                cp -P \"\$ld_linux\" libs/
+              fi
+
+              echo \"USB/IP userspace tools build and collection complete.\"
+            "
+
+      - name: Package USB/IP artifacts
+        run: |
+          cd usbip_output
+          tar czf ../usbip-arm64-bundle-with-modules.tar.gz .
+          cd ..
+
+      - name: Upload USB/IP bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: usbip-arm64-with-modules-and-deps
+          path: usbip-arm64-bundle-with-modules.tar.gz
+
+      # ========== 打包内核刷写包（AnyKernel3） ==========
+      - name: Repack Kernel Artifacts
+        id: pack
+        run: |
+          # 查找生成的镜像文件（允许不同命名）
+          IMAGE=$(find kernel/arch/arm64/boot -name "Image.gz-dtb" -o -name "Image" | head -1)
+          if [ -z "$IMAGE" ]; then
+            echo "ERROR: No kernel image found in kernel/arch/arm64/boot/"
+            exit 1
+          fi
+          DTBO=$(find kernel/arch/arm64/boot -name "dtbo.img" | head -1)
+          if [ -z "$DTBO" ]; then
+            echo "ERROR: dtbo.img not found in kernel/arch/arm64/boot/"
+            exit 1
+          fi
+
+          git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
+          cp "$IMAGE" $HOME/AnyKernel3/Image.gz-dtb
+          cp "$DTBO" $HOME/AnyKernel3/dtbo.img
+
+          DEVICE="raphael"
+          ANDROID_VER="16.0"
+          ZIP_NAME="anykernel3-${DEVICE}-${ANDROID_VER}.zip"
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          echo "DEVICE=${DEVICE}" >> $GITHUB_ENV
+          echo "ANDROID_VER=${ANDROID_VER}" >> $GITHUB_ENV
+
+          cd $HOME/AnyKernel3
+          zip -r9 ${ZIP_NAME} * -x .git README.md *placeholder
+          mv ${ZIP_NAME} $GITHUB_WORKSPACE/
+          cd $GITHUB_WORKSPACE
+
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ github.workspace }}/${{ env.ZIP_NAME }}
+
+      - name: Create Release and Upload Asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            Kernel for ${{ env.DEVICE }} (Android ${{ env.ANDROID_VER }})
+            Built from commit ${{ github.sha }}
+          files: |
+            ${{ github.workspace }}/${{ env.ZIP_NAME }}
+            ${{ github.workspace }}/usbip-arm64-bundle-with-modules.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

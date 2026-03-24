@@ -1,67 +1,256 @@
- name: Configure kernel options (LXC/Docker + user defined + USB/IP as modules)
-  working-directory: kernel
-  run: |
-    DEFCONFIG="arch/arm64/configs/raphael_defconfig"
+name: Continues testing
 
-    # 先删除可能存在的旧定义
-    for opt in SYSVIPC SYSVIPC_SYSCTL SYSVIPC_COMPAT LOCALVERSION USBIP_CORE USBIP_VHCI_HCD USBIP_HOST; do
-      sed -i "/^#\?CONFIG_$opt/d" $DEFCONFIG
-    done
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '*'
+  pull_request:
 
-    # 追加配置（USB/IP 设为模块）
-    cat << EOF >> $DEFCONFIG
-    ...（原有其他配置保持不变）
-    CONFIG_USBIP_CORE=m
-    CONFIG_USBIP_VHCI_HCD=m
-    CONFIG_USBIP_HOST=m
-    EOF
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KBUILD_BUILD_USER: NATO66613
+      KBUILD_BUILD_HOST: KREMLIN
 
-    echo 'CONFIG_LOCALVERSION="-Geeeeeker-perf"' >> $DEFCONFIG
+    steps:
+      - name: Clone kernel source manually
+        run: |
+          git clone --depth=1 -b 16.0 https://github.com/Geeeeeker/kernel_xiaomi_raphael-pixel.git kernel
 
-- name: Build the kernel with ccache
-  working-directory: kernel
-  run: |
-    export CLANG_PATH=$HOME/r547379/bin
-    export PATH=${CLANG_PATH}:${PATH}
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          create-symlink: true
+          key: kernel-build-cache
+          restore-keys: |
+            kernel-build-cache
+          max-size: '10G'
 
-    make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
-    # 打印当前 USB/IP 配置
-    echo "=== USB/IP config before olddefconfig ==="
-    grep "CONFIG_USBIP" .config || true
+      - name: Restore toolchain cache
+        id: restore-clang
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/r547379
+          key: clang-r547379
 
-    # 自动处理依赖
-    make LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
-    echo "=== USB/IP config after olddefconfig ==="
-    grep "CONFIG_USBIP" .config || true
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
+          ccache --show-stats
 
-    # 全量编译（包括内核镜像）
-    make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
+      - name: Deploy Clang
+        if: steps.restore-clang.outputs.cache-hit != 'true'
+        run: |
+          git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
 
-    # 显式生成需要的镜像文件
-    make LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
+      - name: Save clang
+        if: steps.restore-clang.outputs.cache-hit != 'true'
+        id: cache-clang-save
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/r547379
+          key: clang-r547379
 
-    # 显式编译 USB/IP 模块（并输出详细日志）
-    echo "=== Building USB/IP modules ==="
-    make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules V=1
-    # 立即检查是否生成了 .ko
-    echo "=== Checking generated .ko files ==="
-    find drivers/usb/usbip -name '*.ko' -ls || echo "No .ko files found"
+      - name: Configure kernel options (LXC/Docker + user defined + USB/IP as modules)
+        working-directory: kernel
+        run: |
+          DEFCONFIG="arch/arm64/configs/raphael_defconfig"
 
-    ccache --show-stats
-    ccache --show-config
-  shell: bash
+          # 先删除可能存在的旧定义，避免冲突
+          for opt in SYSVIPC SYSVIPC_SYSCTL SYSVIPC_COMPAT LOCALVERSION USBIP_CORE USBIP_VHCI_HCD USBIP_HOST; do
+            sed -i "/^#\?CONFIG_$opt/d" $DEFCONFIG
+          done
 
-- name: Collect USB/IP kernel modules
-  run: |
-    mkdir -p usbip_output/modules
-    echo "Looking for USB/IP kernel modules..."
-    # 再次全局搜索
-    find kernel -name '*.ko' | grep usbip || true
-    # 从已知路径复制
-    cp kernel/drivers/usb/usbip/*.ko usbip_output/modules/ 2>/dev/null || true
-    if [ -z "$(ls -A usbip_output/modules/)" ]; then
-      echo "ERROR: No USB/IP kernel modules found!"
-      exit 1
-    fi
-    echo "USB/IP kernel modules collected:"
-    ls -l usbip_output/modules/
+          cat << EOF >> $DEFCONFIG
+          CONFIG_UPROBE_EVENTS=y
+          CONFIG_KPROBE_EVENTS=y
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KPROBE_EVENT=y
+          CONFIG_KALLSYMS=y
+          CONFIG_UPROBES=y
+          CONFIG_MMU=y
+          CONFIG_PERF_EVENTS=y
+          CONFIG_UPROBE_EVENT=y
+          CONFIG_BPF=y
+          CONFIG_BPF_EVENTS=y
+          CONFIG_BPF_JIT=y
+          CONFIG_DEBUG_INFO_BTF=y
+          CONFIG_HAVE_BPF_JIT=y
+          CONFIG_NF_NAT_IPV6=y
+          CONFIG_IP6_NF_TARGET_MASQUERADE=y
+          CONFIG_NETFILTER_XT_TARGET_CHECKSUM=y
+          CONFIG_FHANDLE=y
+          CONFIG_UNIX_DIAG=y
+          CONFIG_PACKET_DIAG=y
+          CONFIG_NETLINK_DIAG=y
+          CONFIG_VLAN_8021Q=y
+          CONFIG_NET_L3_MASTER_DEV=y
+          CONFIG_NET_NS=y
+          CONFIG_KEYS=y
+          CONFIG_NETFILTER_XT_MARK=y
+          CONFIG_NF_NAT=y
+          CONFIG_NF_NAT_IPV4=y
+          CONFIG_NF_NAT_NEEDED=y
+          CONFIG_SECCOMP_FILTER=y
+          CONFIG_MEMCG_SWAP_ENABLED=y
+          CONFIG_IOSCHED_CFQ=y
+          CONFIG_CGROUP_PERF=y
+          CONFIG_FAIR_GROUP_SCHED=y
+          CONFIG_VXLAN=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_AEAD=y
+          CONFIG_CRYPTO_SEQIV=y
+          CONFIG_CRYPTO_GHASH=y
+          CONFIG_XFRM=y
+          CONFIG_XFRM_ALGO=y
+          CONFIG_INET_XFRM_MODE_TRANSPORT=y
+          CONFIG_NF_NAT_FTP=y
+          CONFIG_NF_NAT_TFTP=y
+          CONFIG_AUFS_FS=y
+          CONFIG_DM_THIN_PROVISIONING=y
+          CONFIG_BPF_CGROUP_DEVICE=y
+          CONFIG_MACVLAN=y
+          CONFIG_SYSVIPC=y
+          CONFIG_SYSVIPC_SYSCTL=y
+          CONFIG_SYSVIPC_COMPAT=y
+          CONFIG_EPOLL=y
+          CONFIG_EVENTFD=y
+          CONFIG_SIGNALFD=y
+          CONFIG_INOTIFY_USER=y
+          CONFIG_SHMEM=y
+          CONFIG_TMPFS=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_USBIP_CORE=m
+          CONFIG_USBIP_VHCI_HCD=m
+          CONFIG_USBIP_HOST=m
+          CONFIG_DOCKER=y
+          CONFIG_PID_NS=y
+          CONFIG_IPC_NS=y
+          CONFIG_UTS_NS=y
+          CONFIG_VETH=y
+          CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+          CONFIG_NETFILTER_XT_MATCH_IPVS=y
+          CONFIG_POSIX_MQUEUE=y
+          CONFIG_CGROUP_PIDS=y
+          CONFIG_BLK_DEV_THROTTLING=y
+          CONFIG_CGROUP_PERF=y
+          CONFIG_VXLAN=y
+          CONFIG_CGROUP_HUGETLB=y
+          CONFIG_NET_CLS_CGROUP=y
+          CONFIG_CGROUP_NET_PRIO=y
+          CONFIG_IP_VS=y
+          CONFIG_IP_VS_NFCT=y
+          CONFIG_IP_VS_PROTO_TCP=y
+          CONFIG_IP_VS_PROTO_UDP=y
+          CONFIG_IP_VS_RR=y
+          CONFIG_SECURITY_APPARMOR=y
+          EOF
+
+          # 设置 LOCALVERSION
+          echo 'CONFIG_LOCALVERSION="-Geeeeeker-perf"' >> $DEFCONFIG
+
+      - name: Build the kernel with ccache
+        working-directory: kernel
+        run: |
+          export CLANG_PATH=$HOME/r547379/bin
+          export PATH=${CLANG_PATH}:${PATH}
+
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
+          echo "=== USB/IP config after defconfig ==="
+          grep "CONFIG_USBIP" .config || true
+
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
+          echo "=== USB/IP config after olddefconfig ==="
+          grep "CONFIG_USBIP" .config || true
+
+          # 全量编译内核
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
+
+          # 显式生成所需的镜像文件
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
+
+          # 显式编译 USB/IP 模块（并显示详细日志）
+          echo "=== Building USB/IP modules ==="
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules V=1
+          echo "=== Checking generated .ko files ==="
+          find drivers/usb/usbip -name '*.ko' -ls || echo "No .ko files found"
+
+          ccache --show-stats
+          ccache --show-config
+        shell: bash
+
+      # ========== 收集 USB/IP 内核模块 ==========
+      - name: Collect USB/IP kernel modules
+        run: |
+          mkdir -p usbip_output/modules
+          echo "Looking for USB/IP kernel modules..."
+          find kernel -name '*.ko' | grep usbip || true
+          # 从可能的位置复制
+          cp kernel/drivers/usb/usbip/*.ko usbip_output/modules/ 2>/dev/null || true
+          if [ -z "$(ls -A usbip_output/modules/)" ]; then
+            echo "ERROR: No USB/IP kernel modules found!"
+            exit 1
+          fi
+          echo "USB/IP kernel modules collected:"
+          ls -l usbip_output/modules/
+
+      # ========== 使用 Docker 容器编译 USB/IP 用户态工具（arm64） ==========
+      - name: Set up QEMU for multi-arch
+        run: |
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
+      - name: Build usbip userspace tools in arm64 container
+        run: |
+          mkdir -p usbip_output/{bin,libs}
+
+          docker run --rm --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            arm64v8/ubuntu:24.04 \
+            bash -c "
+              set -e
+              export DEBIAN_FRONTEND=noninteractive
+
+              # 安装编译依赖（Ubuntu 24.04 自带 GCC 13）
+              apt update
+              apt install -y \
+                build-essential \
+                autoconf \
+                libtool \
+                pkg-config \
+                libudev-dev \
+                libssl-dev \
+                flex \
+                bison \
+                wget \
+                file \
+                kmod
+
+              cd kernel/tools/usb/usbip
+
+              ./autogen.sh
+              ./configure \
+                CFLAGS=\"-Wno-error -Wno-error=stringop-truncation\" \
+                --with-tcp-wrappers=no
+              make -j\$(nproc)
+
+              # 复制二进制和库
+              cp src/.libs/usbip /workspace/usbip_output/bin/
+              cp src/.libs/usbipd /workspace/usbip_output/bin/
+              cp libsrc/.libs/libusbip.so.0* /workspace/usbip_output/libs/
+
+              # 收集动态库依赖
+              cd /workspace/usbip_output
+              BINARIES=\"bin/usbip bin/usbipd libs/libusbip.so.0*\"
+              DEPS=\"\"
+
+              for file in \$BINARIES; do
+                if [ -f \"\$file\" ]; then
+                  echo \"Collecting dependencies for \$file...\"
+                  needed=\$(readelf -d \"\$file\" | grep NEEDED

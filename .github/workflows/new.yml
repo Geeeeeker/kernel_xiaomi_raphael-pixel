@@ -19,7 +19,6 @@ jobs:
       - name: Clone kernel source manually
         run: |
           git clone --depth=1 -b 16.0 https://github.com/Geeeeeker/kernel_xiaomi_raphael-pixel.git kernel
-
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -41,12 +40,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
           ccache --show-stats
-
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
-
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         id: cache-clang-save
@@ -59,7 +56,6 @@ jobs:
         working-directory: kernel
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
-
           # 原有 LXC/Docker 支持配置
           rm -rf utils
           git clone https://github.com/tomxi1997/lxc-docker-support-for-android.git utils
@@ -89,7 +85,6 @@ jobs:
           if [ -f net/netfilter/xt_qtaguid.c ]; then
               patch -p0 < utils/xt_qtaguid.patch
           fi
-
           # 2. 添加用户提供的所有 CONFIG_* 项
           cat << EOF >> $DEFCONFIG
           CONFIG_UPROBE_EVENTS=y
@@ -177,7 +172,6 @@ jobs:
           CONFIG_IP_VS_RR=y
           CONFIG_SECURITY_APPARMOR=y
           EOF
-
           # 修正 SYSVIPC 相关选项
           sed -i '/CONFIG_SYSVIPC/d' $DEFCONFIG
           sed -i '/CONFIG_SYSVIPC_SYSCTL/d' $DEFCONFIG
@@ -185,11 +179,9 @@ jobs:
           echo "CONFIG_SYSVIPC=y" >> $DEFCONFIG
           echo "CONFIG_SYSVIPC_SYSCTL=y" >> $DEFCONFIG
           echo "CONFIG_SYSVIPC_COMPAT=y" >> $DEFCONFIG
-
           # 设置 LOCALVERSION
           sed -i '/CONFIG_LOCALVERSION/d' $DEFCONFIG
           echo 'CONFIG_LOCALVERSION="-Geeeeeker-perf"' >> $DEFCONFIG
-
       - name: Build the kernel with ccache
         working-directory: kernel
         run: |
@@ -209,19 +201,16 @@ jobs:
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
           cp kernel/out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp kernel/out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
-
           DEVICE="raphael"
           ANDROID_VER="16.0"
           ZIP_NAME="anykernel3-${DEVICE}-${ANDROID_VER}.zip"
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "DEVICE=${DEVICE}" >> $GITHUB_ENV
           echo "ANDROID_VER=${ANDROID_VER}" >> $GITHUB_ENV
-
           cd $HOME/AnyKernel3
           zip -r9 ${ZIP_NAME} * -x .git README.md *placeholder
           mv ${ZIP_NAME} $GITHUB_WORKSPACE/
           cd $GITHUB_WORKSPACE
-
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:

@@ -182,29 +182,24 @@ jobs:
           # 显式生成所需的镜像文件
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
 
-          # 检查 USB/IP 源文件目录
-          echo "=== Checking USB/IP source directory ==="
-          ls -la drivers/usb/usbip/ || echo "Directory not found"
-          cat drivers/usb/usbip/Makefile || echo "Makefile not found"
+          # 清理旧的 USB/IP 模块产物，强制重新编译
+          echo "=== Cleaning USB/IP modules ==="
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip clean
 
-          # 尝试强制编译 USB/IP 模块（添加 V=1 获取详细输出）
+          # 确认源文件存在
+          echo "=== USB/IP source files ==="
+          ls -la drivers/usb/usbip/*.c || echo "No source files found"
+
+          # 编译 USB/IP 模块（显示详细输出）
           echo "=== Building USB/IP modules with verbose output ==="
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules V=1 || {
             echo "ERROR: USB/IP modules compilation failed"
             exit 1
           }
 
-          # 尝试编译单个目标，以便看到具体错误
-          echo "=== Attempting to compile usbip-core.o ==="
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" drivers/usb/usbip/usbip-core.o V=1 || true
-
-          # 检查生成的 .o 和 .ko 文件
-          echo "=== Checking generated object files ==="
-          find . -name '*.o' | grep -i usbip || echo "No .o files found"
+          # 检查生成的 .ko 文件
           echo "=== Checking generated .ko files ==="
           find . -name '*.ko' | grep -i usbip || echo "No .ko files found"
-
-          # 如果仍然没有 .ko，则报错
           if ! find . -name '*.ko' | grep -q -i usbip; then
             echo "ERROR: USB/IP modules not built. Check compilation errors above."
             exit 1

@@ -166,34 +166,41 @@ jobs:
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
 
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
+          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
+          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
 
           # 显式生成所需的镜像文件
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
+          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
 
           ccache --show-stats
           ccache --show-config
         shell: bash
 
-      # ========== 编译 USB/IP 内核模块（使用 O=out） ==========
+      # ========== 强制将 USB/IP 配置改为模块 ==========
+      - name: Force USB/IP config to modules
+        working-directory: kernel
+        run: |
+          # 修改 out/.config 将 USBIP 相关选项从 =y 改为 =m
+          sed -i 's/CONFIG_USBIP_CORE=y/CONFIG_USBIP_CORE=m/' out/.config
+          sed -i 's/CONFIG_USBIP_VHCI_HCD=y/CONFIG_USBIP_VHCI_HCD=m/' out/.config
+          sed -i 's/CONFIG_USBIP_HOST=y/CONFIG_USBIP_HOST=m/' out/.config
+          # 确认修改
+          grep "CONFIG_USBIP" out/.config
+
+      # ========== 编译 USB/IP 内核模块（使用修改后的配置） ==========
       - name: Build USB/IP kernel modules
         working-directory: kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
 
+          # 重新生成头文件（因为配置改变了）
+          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" prepare
+          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" scripts
+
           # 清理旧的 USB/IP 产物
           echo "=== Cleaning USB/IP modules ==="
           make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip clean
-
-          # 确认 .config 存在
-          echo "=== Checking .config in out ==="
-          ls -la out/.config || exit 1
-
-          # 打印 USB/IP 配置
-          echo "=== USB/IP config ==="
-          grep "CONFIG_USBIP" out/.config || echo "None found"
 
           # 编译 USB/IP 模块
           echo "=== Building USB/IP modules ==="
@@ -327,15 +334,15 @@ jobs:
       - name: Repack Kernel Artifacts
         id: pack
         run: |
-          # 查找生成的镜像文件
-          IMAGE=$(find kernel/arch/arm64/boot -name "Image.gz-dtb" -o -name "Image" | head -1)
+          # 查找生成的镜像文件（在 out 目录中）
+          IMAGE=$(find kernel/out/arch/arm64/boot -name "Image.gz-dtb" -o -name "Image" | head -1)
           if [ -z "$IMAGE" ]; then
-            echo "ERROR: No kernel image found in kernel/arch/arm64/boot/"
+            echo "ERROR: No kernel image found in kernel/out/arch/arm64/boot/"
             exit 1
           fi
-          DTBO=$(find kernel/arch/arm64/boot -name "dtbo.img" | head -1)
+          DTBO=$(find kernel/out/arch/arm64/boot -name "dtbo.img" | head -1)
           if [ -z "$DTBO" ]; then
-            echo "ERROR: dtbo.img not found in kernel/arch/arm64/boot/"
+            echo "ERROR: dtbo.img not found in kernel/out/arch/arm64/boot/"
             exit 1
           fi
 

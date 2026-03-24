@@ -1,4 +1,4 @@
-name: Continues testing
+name: Continues testing usbip
 
 on:
   push:
@@ -40,10 +40,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
-          # 添加 arm64 架构支持，以便安装交叉编译所需的开发库
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update
-          sudo apt-get install -y autoconf libtool pkg-config libudev-dev:arm64 libssl-dev:arm64 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
           ccache --show-stats
 
       - name: Deploy Clang
@@ -59,12 +55,12 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      - name: Configure kernel options (LXC/Docker + user defined + USB/IP)
+      - name: Configure kernel options (LXC/Docker + user defined + USB/IP as modules)
         working-directory: kernel
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
 
-          # 追加用户提供的 CONFIG_* 项，并将 USB/IP 改为模块（=m）以便生成 .ko 文件
+          # 追加用户提供的 CONFIG_* 项，USB/IP 设为模块（=m）
           cat << EOF >> $DEFCONFIG
           CONFIG_UPROBE_EVENTS=y
           CONFIG_KPROBE_EVENTS=y
@@ -177,88 +173,105 @@ jobs:
           ccache --show-config
         shell: bash
 
-      # ========== 编译 USB/IP 模块和用户态工具（使用当前内核树） ==========
-      - name: Build USB/IP kernel modules and userspace tools (cross-compile)
-        working-directory: kernel
+      # ========== 提取 USB/IP 内核模块（主机已编译） ==========
+      - name: Collect USB/IP kernel modules
         run: |
-          # 准备模块编译环境（生成必要的头文件）
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" modules_prepare
+          mkdir -p usbip_output/modules
+          find kernel/drivers/usb/usbip -name '*.ko' -exec cp {} usbip_output/modules/ \;
+          echo "USB/IP kernel modules collected:"
+          ls -l usbip_output/modules/
 
-          # 编译 USB/IP 内核模块（仅编译该目录）
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules
+      # ========== 使用 Docker 容器编译 USB/IP 用户态工具（arm64） ==========
+      - name: Set up QEMU for multi-arch
+        run: |
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
-          # 编译用户态工具（交叉编译）
-          cd tools/usb/usbip
-          ./autogen.sh
-          ./configure --host=aarch64-linux-gnu \
-                      CFLAGS="-Wno-error -Wno-error=stringop-truncation" \
-                      --with-tcp-wrappers=no
-          make -j$(nproc)
+      - name: Build usbip userspace tools in arm64 container
+        run: |
+          # 将内核源码树复制一份到容器可访问的位置（用于用户态工具编译，需要内核头文件）
+          # 实际上用户态工具编译不需要整个内核树，只需要 tools/usb/usbip 目录及依赖。
+          # 但为了简化，我们挂载整个内核目录，容器内只使用 tools/usb/usbip 部分。
+          mkdir -p ${{ github.workspace }}/usbip_output/{bin,libs}
 
-          # 创建输出目录
-          mkdir -p $GITHUB_WORKSPACE/usbip_output/{bin,libs,modules}
+          docker run --rm --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            arm64v8/ubuntu:22.04 \
+            bash -c "
+              set -e
+              export DEBIAN_FRONTEND=noninteractive
 
-          # 复制内核模块
-          find ../../drivers/usb/usbip -name '*.ko' -exec cp {} $GITHUB_WORKSPACE/usbip_output/modules/ \;
+              # 安装编译依赖
+              apt update
+              apt install -y \
+                build-essential \
+                autoconf \
+                libtool \
+                pkg-config \
+                libudev-dev \
+                libssl-dev \
+                flex \
+                bison \
+                wget \
+                file \
+                kmod
 
-          # 复制用户态二进制
-          cp src/.libs/usbip $GITHUB_WORKSPACE/usbip_output/bin/
-          cp src/.libs/usbipd $GITHUB_WORKSPACE/usbip_output/bin/
+              # 进入内核源码中的 usbip 工具目录
+              cd kernel/tools/usb/usbip
 
-          # 复制 libusbip.so 库
-          cp libsrc/.libs/libusbip.so.0* $GITHUB_WORKSPACE/usbip_output/libs/
+              # 配置并编译
+              ./autogen.sh
+              ./configure \
+                CFLAGS=\"-Wno-error -Wno-error=stringop-truncation\" \
+                --with-tcp-wrappers=no
+              make -j\$(nproc)
 
-          # 收集动态库依赖（参考 all-file.yml 的方法）
-          cd $GITHUB_WORKSPACE/usbip_output
-          BINARIES="bin/usbip bin/usbipd libs/libusbip.so.0*"
-          DEPS=""
+              # 复制二进制和库到输出目录
+              cp src/.libs/usbip /workspace/usbip_output/bin/
+              cp src/.libs/usbipd /workspace/usbip_output/bin/
+              cp libsrc/.libs/libusbip.so.0* /workspace/usbip_output/libs/
 
-          for file in $BINARIES; do
-            if [ -f "$file" ]; then
-              echo "Collecting dependencies for $file..."
-              needed=$(aarch64-linux-gnu-readelf -d "$file" | grep NEEDED | awk '{print $5}' | tr -d '[]' || true)
-              for lib in $needed; do
-                if [[ "$DEPS" != *"$lib"* ]]; then
-                  DEPS="$DEPS $lib"
+              # 收集动态库依赖
+              cd /workspace/usbip_output
+              BINARIES=\"bin/usbip bin/usbipd libs/libusbip.so.0*\"
+              DEPS=\"\"
+
+              for file in \$BINARIES; do
+                if [ -f \"\$file\" ]; then
+                  echo \"Collecting dependencies for \$file...\"
+                  needed=\$(readelf -d \"\$file\" | grep NEEDED | awk '{print \$5}' | tr -d '[]' || true)
+                  for lib in \$needed; do
+                    if [[ \"\$DEPS\" != *\"\$lib\"* ]]; then
+                      DEPS=\"\$DEPS \$lib\"
+                    fi
+                  done
                 fi
               done
-            fi
-          done
 
-          # 去重并复制库文件
-          for lib in $(echo $DEPS | tr ' ' '\n' | sort -u); do
-            echo "Searching for library: $lib"
-            # 优先从交叉编译 sysroot 中查找
-            libpath=$(find /usr/aarch64-linux-gnu/lib -name "$lib" -type f 2>/dev/null | head -1)
-            if [ -z "$libpath" ]; then
-              libpath=$(find /usr/lib/aarch64-linux-gnu -name "$lib" -type f 2>/dev/null | head -1)
-            fi
-            if [ -z "$libpath" ]; then
-              libpath=$(find /lib/aarch64-linux-gnu -name "$lib" -type f 2>/dev/null | head -1)
-            fi
-            if [ -n "$libpath" ]; then
-              echo "Found: $libpath"
-              cp -P "$libpath" libs/ 2>/dev/null || cp "$libpath" libs/
-              # 同时复制可能的符号链接
-              for reallib in $(find "$(dirname "$libpath")" -name "${lib%.so*}*" -type f 2>/dev/null); do
-                cp -n "$reallib" libs/ 2>/dev/null || true
+              # 去重并复制库文件
+              for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
+                echo \"Searching for library: \$lib\"
+                libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1)
+                if [ -n \"\$libpath\" ]; then
+                  echo \"Found: \$libpath\"
+                  cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
+                  # 复制相关符号链接
+                  for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
+                    cp -n \"\$reallib\" libs/ 2>/dev/null || true
+                  done
+                else
+                  echo \"Warning: library \$lib not found\"
+                fi
               done
-            else
-              echo "Warning: library $lib not found"
-            fi
-          done
 
-          # 确保 ld-linux 被复制
-          ld_linux="/usr/aarch64-linux-gnu/lib/ld-linux-aarch64.so.1"
-          if [ ! -f "$ld_linux" ]; then
-            ld_linux=$(find /usr/lib/aarch64-linux-gnu -name "ld-linux-aarch64.so.*" -type f 2>/dev/null | head -1)
-          fi
-          if [ -n "$ld_linux" ] && [ -f "$ld_linux" ]; then
-            cp -P "$ld_linux" libs/
-          fi
+              # 确保 ld-linux 被复制
+              ld_linux=\"/lib/ld-linux-aarch64.so.1\"
+              if [ -f \"\$ld_linux\" ]; then
+                cp -P \"\$ld_linux\" libs/
+              fi
 
-          echo "USB/IP build and collection complete."
-        shell: bash
+              echo \"USB/IP userspace tools build and collection complete.\"
+            "
 
       - name: Package USB/IP artifacts
         run: |
@@ -272,20 +285,31 @@ jobs:
           name: usbip-arm64-with-modules-and-deps
           path: usbip-arm64-bundle-with-modules.tar.gz
 
-      # ========== 打包内核刷写包（修正路径） ==========
+      # ========== 打包内核刷写包（AnyKernel3） ==========
       - name: Repack Kernel Artifacts
         id: pack
         run: |
+          # 检查镜像文件是否存在
+          if [ ! -f kernel/arch/arm64/boot/Image.gz-dtb ]; then
+            echo "ERROR: Image.gz-dtb not found!"
+            exit 1
+          fi
+          if [ ! -f kernel/arch/arm64/boot/dtbo.img ]; then
+            echo "ERROR: dtbo.img not found!"
+            exit 1
+          fi
+
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
-          # 内核镜像实际位于 kernel/arch/arm64/boot/（而非 kernel/out/）
           cp kernel/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp kernel/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
+
           DEVICE="raphael"
           ANDROID_VER="16.0"
           ZIP_NAME="anykernel3-${DEVICE}-${ANDROID_VER}.zip"
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "DEVICE=${DEVICE}" >> $GITHUB_ENV
           echo "ANDROID_VER=${ANDROID_VER}" >> $GITHUB_ENV
+
           cd $HOME/AnyKernel3
           zip -r9 ${ZIP_NAME} * -x .git README.md *placeholder
           mv ${ZIP_NAME} $GITHUB_WORKSPACE/

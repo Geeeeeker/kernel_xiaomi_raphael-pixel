@@ -1,10 +1,19 @@
+name: Continues testing
+
 on:
   push:
     branches:
-      - '**'
+      - '**'      # 所有分支推送
     tags:
-      - '*'
+      - '*'       # 所有标签推送
   pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KBUILD_BUILD_USER: NATO66613
+      KBUILD_BUILD_HOST: KREMLIN
 
 jobs:
   build:

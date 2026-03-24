@@ -1,12 +1,9 @@
-name: Continues testing
-
 on:
   push:
-    tags:        # 推送标签时触发发布
-      - '*'
-  push:
-    branches:    # 推送分支时仅构建不上传 Release
+    branches:
       - '**'
+    tags:
+      - '*'
   pull_request:
 
 jobs:

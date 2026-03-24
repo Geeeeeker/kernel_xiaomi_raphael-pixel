@@ -2,6 +2,11 @@ name: Continues testing
 
 on:
   push:
+    tags:        # 推送标签时触发发布
+      - '*'
+  push:
+    branches:    # 推送分支时仅构建不上传 Release
+      - '**'
   pull_request:
 
 jobs:
@@ -12,6 +17,7 @@ jobs:
       KBUILD_BUILD_HOST: KREMLIN
 
     steps:
+      # 手动克隆内核源码（避免 checkout 动作的分支解析错误）
       - name: Clone kernel source manually
         run: |
           git clone --depth=1 -b 16.0 https://github.com/Geeeeeker/kernel_xiaomi_raphael-pixel.git kernel
@@ -51,79 +57,201 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      - name: Build the kernel
+      # 配置 LXC/Docker 支持并应用所有内核配置项
+      - name: Configure kernel options (LXC/Docker + user defined)
+        working-directory: kernel
+        run: |
+          DEFCONFIG="arch/arm64/configs/raphael_defconfig"
+
+          # 1. 原有 LXC/Docker 支持配置
+          rm -rf utils
+          git clone https://github.com/tomxi1997/lxc-docker-support-for-android.git utils
+          sed -i '/select CFS_BANDWIDTH/d' utils/Kconfig
+          sed -i '/select DOCKER_STATISTICS/d' utils/Kconfig
+          sed -i '/select BLK_DEV_THROTTLING/d' utils/Kconfig
+          sed -i '/select CFQ_GROUP_IOSCHED/d' utils/Kconfig
+          sed -i '/select BRIDGE_VLAN_FILTERING/d' utils/Kconfig
+          echo 'source "utils/Kconfig"' >> "Kconfig"
+          echo "CONFIG_DOCKER=y" >> $DEFCONFIG
+          echo "# CONFIG_CFS_BANDWIDTH is not set" >> $DEFCONFIG
+          echo "# CONFIG_DOCKER_STATISTICS is not set" >> $DEFCONFIG
+          sed -i '/CONFIG_ANDROID_PARANOID_NETWORK/d' $DEFCONFIG
+          echo "# CONFIG_ANDROID_PARANOID_NETWORK is not set" >> $DEFCONFIG
+          echo "# CONFIG_BLK_DEV_THROTTLING is not set" >> $DEFCONFIG
+          echo "# CONFIG_CFQ_GROUP_IOSCHED is not set" >> $DEFCONFIG
+          sed -i '/sdm845-v2-qvr-evt.dtb/d' arch/arm64/boot/dts/qcom/Makefile
+          sed -i '/qvr/d' arch/arm64/boot/dts/qcom/Makefile
+          sed -i '/interposer/d' arch/arm64/boot/dts/qcom/Makefile
+          chmod +x utils/runcpatch.sh
+          if [ -f cgroup/cgroup.c ]; then
+              sh utils/runcpatch.sh cgroup/cgroup.c
+          fi
+          if [ -f cgroup.c ]; then
+              sh utils/runcpatch.sh cgroup.c
+          fi
+          if [ -f net/netfilter/xt_qtaguid.c ]; then
+              patch -p0 < utils/xt_qtaguid.patch
+          fi
+
+          # 2. 添加用户提供的所有 CONFIG_* 项
+          cat << EOF >> $DEFCONFIG
+          CONFIG_UPROBE_EVENTS=y
+          CONFIG_KPROBE_EVENTS=y
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KPROBE_EVENT=y
+          CONFIG_KALLSYMS=y
+          CONFIG_UPROBES=y
+          CONFIG_MMU=y
+          CONFIG_PERF_EVENTS=y
+          CONFIG_UPROBE_EVENT=y
+          CONFIG_BPF=y
+          CONFIG_BPF_EVENTS=y
+          CONFIG_BPF_JIT=y
+          CONFIG_DEBUG_INFO_BTF=y
+          CONFIG_HAVE_BPF_JIT=y
+          CONFIG_NF_NAT_IPV6=y
+          CONFIG_IP6_NF_TARGET_MASQUERADE=y
+          CONFIG_NETFILTER_XT_TARGET_CHECKSUM=y
+          CONFIG_FHANDLE=y
+          CONFIG_UNIX_DIAG=y
+          CONFIG_PACKET_DIAG=y
+          CONFIG_NETLINK_DIAG=y
+          CONFIG_VLAN_8021Q=y
+          CONFIG_NET_L3_MASTER_DEV=y
+          CONFIG_NET_NS=y
+          CONFIG_KEYS=y
+          CONFIG_NETFILTER_XT_MARK=y
+          CONFIG_NF_NAT=y
+          CONFIG_NF_NAT_IPV4=y
+          CONFIG_NF_NAT_NEEDED=y
+          CONFIG_SECCOMP_FILTER=y
+          CONFIG_MEMCG_SWAP_ENABLED=y
+          CONFIG_IOSCHED_CFQ=y
+          CONFIG_CGROUP_PERF=y
+          CONFIG_FAIR_GROUP_SCHED=y
+          CONFIG_VXLAN=y
+          CONFIG_CRYPTO=y
+          CONFIG_CRYPTO_AEAD=y
+          CONFIG_CRYPTO_SEQIV=y
+          CONFIG_CRYPTO_GHASH=y
+          CONFIG_XFRM=y
+          CONFIG_XFRM_ALGO=y
+          CONFIG_INET_XFRM_MODE_TRANSPORT=y
+          CONFIG_NF_NAT_FTP=y
+          CONFIG_NF_NAT_TFTP=y
+          CONFIG_AUFS_FS=y
+          CONFIG_DM_THIN_PROVISIONING=y
+          CONFIG_BPF_CGROUP_DEVICE=y
+          CONFIG_MACVLAN=y
+          CONFIG_SYSVIPC=y
+          CONFIG_SYSVIPC_SYSCTL=y
+          CONFIG_SYSVIPC_COMPAT=y
+          CONFIG_EPOLL=y
+          CONFIG_EVENTFD=y
+          CONFIG_SIGNALFD=y
+          CONFIG_INOTIFY_USER=y
+          CONFIG_SHMEM=y
+          CONFIG_TMPFS=y
+          CONFIG_TMPFS_POSIX_ACL=y
+          CONFIG_TMPFS_XATTR=y
+          CONFIG_USBIP_CORE=y
+          CONFIG_USBIP_VHCI_HCD=y
+          CONFIG_USBIP_HOST=y
+          CONFIG_DOCKER=y
+          CONFIG_PID_NS=y
+          CONFIG_IPC_NS=y
+          CONFIG_UTS_NS=y
+          CONFIG_VETH=y
+          CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+          CONFIG_NETFILTER_XT_MATCH_IPVS=y
+          CONFIG_POSIX_MQUEUE=y
+          CONFIG_CGROUP_PIDS=y
+          CONFIG_BLK_DEV_THROTTLING=y
+          CONFIG_CGROUP_PERF=y
+          CONFIG_VXLAN=y
+          CONFIG_CGROUP_HUGETLB=y
+          CONFIG_NET_CLS_CGROUP=y
+          CONFIG_CGROUP_NET_PRIO=y
+          CONFIG_IP_VS=y
+          CONFIG_IP_VS_NFCT=y
+          CONFIG_IP_VS_PROTO_TCP=y
+          CONFIG_IP_VS_PROTO_UDP=y
+          CONFIG_IP_VS_RR=y
+          CONFIG_SECURITY_APPARMOR=y
+          EOF
+
+          # 3. 修正 SYSVIPC 相关选项（确保它们为 y，并移除可能的 “not set” 行）
+          sed -i '/CONFIG_SYSVIPC/d' $DEFCONFIG
+          sed -i '/CONFIG_SYSVIPC_SYSCTL/d' $DEFCONFIG
+          sed -i '/CONFIG_SYSVIPC_COMPAT/d' $DEFCONFIG
+          echo "CONFIG_SYSVIPC=y" >> $DEFCONFIG
+          echo "CONFIG_SYSVIPC_SYSCTL=y" >> $DEFCONFIG
+          echo "CONFIG_SYSVIPC_COMPAT=y" >> $DEFCONFIG
+
+          # 4. 设置 LOCALVERSION
+          sed -i '/CONFIG_LOCALVERSION/d' $DEFCONFIG
+          echo 'CONFIG_LOCALVERSION="-Geeeeeker-perf"' >> $DEFCONFIG
+
+      - name: Build the kernel with ccache
         working-directory: kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
           
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(nproc)
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
           
           ccache --show-stats
           ccache --show-config
+        shell: bash
 
-      - name: Prepare kernel artifacts
+      # 打包 AnyKernel3 并准备发布文件
+      - name: Repack Kernel Artifacts
+        id: pack
         run: |
-          # 创建输出目录
-          mkdir -p artifacts
+          git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
+          cp kernel/out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
+          cp kernel/out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
 
-          # 复制内核镜像和 dtbo
-          cp kernel/out/arch/arm64/boot/Image.gz-dtb artifacts/
-          cp kernel/out/arch/arm64/boot/dtbo.img artifacts/
+          # 提取设备名（从内核源码路径推断，或可自定义）
+          DEVICE="raphael"
+          # 提取安卓版本（从内核分支名，此处为 16.0）
+          ANDROID_VER="16.0"
+          # 生成 ZIP 文件名
+          ZIP_NAME="anykernel3-${DEVICE}-${ANDROID_VER}.zip"
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          echo "DEVICE=${DEVICE}" >> $GITHUB_ENV
+          echo "ANDROID_VER=${ANDROID_VER}" >> $GITHUB_ENV
 
-          # 生成 boot.img（需要 mkbootimg，这里假设已安装）
-          # 你需要根据设备实际分区调整参数，以下为示例
-          sudo apt-get install -y mkbootimg
-          mkbootimg \
-            --kernel artifacts/Image.gz-dtb \
-            --ramdisk /dev/null \
-            --pagesize 4096 \
-            --base 0x00000000 \
-            --kernel_offset 0x00008000 \
-            --ramdisk_offset 0x01000000 \
-            --tags_offset 0x00000100 \
-            --cmdline "console=ttyMSM0,115200,n8 androidboot.console=ttyMSM0 androidboot.hardware=qcom androidboot.memcg=1 lpm_levels.sleep_disabled=1 video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 service_locator.enable=1 androidboot.usbcontroller=a600000.dwc3 swiotlb=2048 loop.max_part=7 cgroup.memory=nokmem,nosocket reboot=panic_warm buildvariant=user" \
-            --dtb artifacts/Image.gz-dtb \
-            --output artifacts/boot.img
+          # 打包 AnyKernel3
+          cd $HOME/AnyKernel3
+          zip -r9 ${ZIP_NAME} * -x .git README.md *placeholder
+          mv ${ZIP_NAME} $GITHUB_WORKSPACE/
+          cd $GITHUB_WORKSPACE
 
-      - name: Prepare AnyKernel3 zip
-        run: |
-          # 克隆 AnyKernel3
-          git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git AnyKernel3
-          cp artifacts/Image.gz-dtb AnyKernel3/
-          cp artifacts/dtbo.img AnyKernel3/
+          # （可选）如果需要 boot.img，可在此生成，但需提供 ramdisk；此处仅打包 AnyKernel3 ZIP
+          # 若确实需要 boot.img，可添加 mkbootimg 步骤（需获取 ramdisk 文件），暂不实现。
 
-          # 生成产物名称（安全处理分支名）
-          BRANCH="${GITHUB_REF#refs/heads/}"
-          # 如果是 PR 或非分支，用默认名
-          if [[ "$BRANCH" == "refs/pull/"* ]] || [[ -z "$BRANCH" ]]; then
-            BRANCH="pull-request"
-          else
-            # 将斜杠替换为连字符，避免非法字符
-            BRANCH=$(echo "$BRANCH" | sed 's|/|-|g')
-          fi
-          COMMIT_HASH="${GITHUB_SHA:0:6}"
-          ZIP_NAME="${BRANCH}-${COMMIT_HASH}.zip"
-
-          # 安全写入环境变量（多行语法）
-          echo "ZIP_NAME<<EOF" >> $GITHUB_ENV
-          echo "$ZIP_NAME" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
-          cd AnyKernel3
-          zip -r9 "../$ZIP_NAME" * -x .git README.md
-          cd ..
-          mv "$ZIP_NAME" artifacts/
-
-      - name: Upload boot.img
+      # 上传为 Artifact（总是保留，方便调试）
+      - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: boot.img-${{ env.ZIP_NAME }}
-          path: artifacts/boot.img
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ github.workspace }}/${{ env.ZIP_NAME }}
 
-      - name: Upload AnyKernel3 zip
-        uses: actions/upload-artifact@v4
+      # 发布到 GitHub Release（仅在推送标签时执行）
+      - name: Create Release and Upload Asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
         with:
-          name: AnyKernel3-${{ env.ZIP_NAME }}
-          path: artifacts/${{ env.ZIP_NAME }}
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            Kernel for ${{ env.DEVICE }} (Android ${{ env.ANDROID_VER }})
+            Built from commit ${{ github.sha }}
+          files: ${{ github.workspace }}/${{ env.ZIP_NAME }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

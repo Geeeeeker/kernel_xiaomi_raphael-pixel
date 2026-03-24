@@ -182,17 +182,21 @@ jobs:
           # 显式生成所需的镜像文件
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
 
-          # 清理旧的 USB/IP 模块产物，强制重新编译
-          echo "=== Cleaning USB/IP modules ==="
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip clean
+          # 彻底清理 USB/IP 模块的中间文件（包括 .o, .ko, .cmd 等）
+          echo "=== Cleaning USB/IP modules thoroughly ==="
+          find . -path "*/usbip/*" -name "*.o" -delete
+          find . -path "*/usbip/*" -name "*.ko" -delete
+          find . -path "*/usbip/*" -name "*.cmd" -delete
+          find . -path "*/usbip/*" -name "*.mod" -delete
+          rm -f drivers/usb/usbip/.tmp_versions/*
 
           # 确认源文件存在
           echo "=== USB/IP source files ==="
           ls -la drivers/usb/usbip/*.c || echo "No source files found"
 
-          # 编译 USB/IP 模块（显示详细输出）
-          echo "=== Building USB/IP modules with verbose output ==="
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules V=1 || {
+          # 强制编译 USB/IP 模块（使用 -B 强制重建所有目标）
+          echo "=== Building USB/IP modules with forced rebuild ==="
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules V=1 -B || {
             echo "ERROR: USB/IP modules compilation failed"
             exit 1
           }
@@ -214,9 +218,7 @@ jobs:
         run: |
           mkdir -p usbip_output/modules
           echo "Looking for USB/IP kernel modules..."
-          # 在整个 kernel 目录中查找 usbip 相关的 .ko 文件
           find kernel -name '*.ko' | grep -i usbip || true
-          # 复制找到的文件
           find kernel -name '*.ko' | grep -i usbip | xargs -I {} cp {} usbip_output/modules/ || true
           if [ -z "$(ls -A usbip_output/modules/)" ]; then
             echo "ERROR: No USB/IP kernel modules found!"

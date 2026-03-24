@@ -133,6 +133,7 @@ jobs:
           CONFIG_USB_SUPPORT=y
           CONFIG_MODULES=y
           CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+          CONFIG_MODVERSIONS=y
           CONFIG_USBIP_CORE=m
           CONFIG_USBIP_VHCI_HCD=m
           CONFIG_USBIP_HOST=m
@@ -178,8 +179,8 @@ jobs:
           ccache --show-config
         shell: bash
 
-      # ========== 强制启用模块支持并将 USB/IP 设为模块 ==========
-      - name: Force CONFIG_MODULES=y and USB/IP as modules
+      # ========== 强制启用模块支持、USB/IP 为模块、MODVERSIONS 和 SECTION_MISMATCH_WARN_ONLY ==========
+      - name: Force kernel config for modules
         working-directory: kernel
         run: |
           # 确保 CONFIG_MODULES=y
@@ -192,12 +193,15 @@ jobs:
           sed -i '/^# CONFIG_USBIP_CORE is not set/d' out/.config
           sed -i '/^# CONFIG_USBIP_VHCI_HCD is not set/d' out/.config
           sed -i '/^# CONFIG_USBIP_HOST is not set/d' out/.config
+          # 添加 MODVERSIONS
+          sed -i '/# CONFIG_MODVERSIONS is not set/d' out/.config
+          echo 'CONFIG_MODVERSIONS=y' >> out/.config
           # 添加 section mismatch 警告降级
           sed -i '/^# CONFIG_SECTION_MISMATCH_WARN_ONLY is not set/d' out/.config
           echo 'CONFIG_SECTION_MISMATCH_WARN_ONLY=y' >> out/.config
 
           # 验证
-          grep -E "CONFIG_MODULES|CONFIG_USBIP|CONFIG_SECTION_MISMATCH_WARN_ONLY" out/.config
+          grep -E "CONFIG_MODULES|CONFIG_USBIP|CONFIG_MODVERSIONS|CONFIG_SECTION_MISMATCH_WARN_ONLY" out/.config
 
           # 重新运行 olddefconfig 和 prepare
           make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig

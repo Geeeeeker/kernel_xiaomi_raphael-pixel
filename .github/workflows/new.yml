@@ -1,4 +1,4 @@
-- name: Configure kernel options (LXC/Docker + user defined + USB/IP as modules)
+name: Configure kernel options (LXC/Docker + user defined + USB/IP as modules)
   working-directory: kernel
   run: |
     DEFCONFIG="arch/arm64/configs/raphael_defconfig"

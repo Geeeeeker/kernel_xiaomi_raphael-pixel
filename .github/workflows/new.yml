@@ -40,7 +40,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
-          # 新增：USB/IP 交叉编译依赖
+          # 启用 arm64 多架构并安装交叉编译所需的开发库
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
           sudo apt-get install -y autoconf libtool pkg-config libudev-dev:arm64 libssl-dev:arm64 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
           ccache --show-stats
 
@@ -175,11 +177,11 @@ jobs:
           ccache --show-config
         shell: bash
 
-      # ========== 新增：编译 USB/IP 模块和用户态工具 ==========
+      # ========== 编译 USB/IP 模块和用户态工具 ==========
       - name: Build USB/IP kernel modules and userspace tools (cross-compile)
         working-directory: kernel
         run: |
-          # 确保 USB/IP 配置已生效（已在上面添加）
+          # 确保 USB/IP 配置已生效
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
 
           # 编译 USB/IP 内核模块
@@ -248,7 +250,10 @@ jobs:
 
           # 确保 ld-linux 被复制
           ld_linux="/usr/aarch64-linux-gnu/lib/ld-linux-aarch64.so.1"
-          if [ -f "$ld_linux" ]; then
+          if [ ! -f "$ld_linux" ]; then
+            ld_linux=$(find /usr/lib/aarch64-linux-gnu -name "ld-linux-aarch64.so.*" -type f 2>/dev/null | head -1)
+          fi
+          if [ -n "$ld_linux" ] && [ -f "$ld_linux" ]; then
             cp -P "$ld_linux" libs/
           fi
 

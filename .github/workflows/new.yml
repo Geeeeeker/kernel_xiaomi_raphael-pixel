@@ -168,13 +168,11 @@ jobs:
 
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
           echo "=== USB/IP config after defconfig ==="
-          grep "CONFIG_USBIP" .config || true
-          grep "CONFIG_USB[^I]" .config | head -20 || true
+          grep "CONFIG_USBIP" .config || echo "None found"
 
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
           echo "=== USB/IP config after olddefconfig ==="
-          grep "CONFIG_USBIP" .config || true
-          grep "CONFIG_USB[^I]" .config | head -20 || true
+          grep "CONFIG_USBIP" .config || echo "None found"
 
           # 全量编译内核（镜像和模块）
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
@@ -182,7 +180,7 @@ jobs:
           # 显式生成所需的镜像文件
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
 
-          # 彻底清理 USB/IP 模块的中间文件（包括 .o, .ko, .cmd 等）
+          # 彻底清理 USB/IP 模块的中间文件
           echo "=== Cleaning USB/IP modules thoroughly ==="
           find . -path "*/usbip/*" -name "*.o" -delete
           find . -path "*/usbip/*" -name "*.ko" -delete
@@ -190,13 +188,23 @@ jobs:
           find . -path "*/usbip/*" -name "*.mod" -delete
           rm -f drivers/usb/usbip/.tmp_versions/*
 
-          # 确认源文件存在
+          # 检查源文件
           echo "=== USB/IP source files ==="
           ls -la drivers/usb/usbip/*.c || echo "No source files found"
 
-          # 强制编译 USB/IP 模块（使用 -B 强制重建所有目标）
+          # 输出详细配置
+          echo "=== CONFIG_USBIP values ==="
+          grep "CONFIG_USBIP" .config || echo "None found"
+          echo "=== CONFIG_USB values ==="
+          grep "CONFIG_USB" .config | grep -v "^#" | head -20
+
+          # 尝试编译单个目标文件，以便看到详细错误
+          echo "=== Attempting to compile usbip_common.o ==="
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" drivers/usb/usbip/usbip_common.o V=1 || true
+
+          # 强制编译 USB/IP 模块
           echo "=== Building USB/IP modules with forced rebuild ==="
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules V=1 -B || {
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules -B V=1 || {
             echo "ERROR: USB/IP modules compilation failed"
             exit 1
           }

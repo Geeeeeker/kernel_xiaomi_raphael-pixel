@@ -186,20 +186,24 @@ jobs:
           sed -i 's/CONFIG_USBIP_HOST=y/CONFIG_USBIP_HOST=m/' out/.config
           # 确认修改
           grep "CONFIG_USBIP" out/.config
+          # 同步配置并更新头文件
+          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
+          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" prepare
+          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" scripts
 
-      # ========== 编译 USB/IP 内核模块（使用修改后的配置） ==========
+      # ========== 编译 USB/IP 内核模块 ==========
       - name: Build USB/IP kernel modules
         working-directory: kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
 
-          # 重新生成头文件（因为配置改变了）
-          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" prepare
-          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" scripts
-
-          # 清理旧的 USB/IP 产物
+          # 彻底清理 USB/IP 产物（在 out 目录）
           echo "=== Cleaning USB/IP modules ==="
+          rm -rf out/drivers/usb/usbip/*.o
+          rm -rf out/drivers/usb/usbip/*.ko
+          rm -rf out/drivers/usb/usbip/*.cmd
+          rm -rf out/drivers/usb/usbip/.tmp_versions
           make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip clean
 
           # 编译 USB/IP 模块

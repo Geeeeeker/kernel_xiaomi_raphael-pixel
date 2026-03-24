@@ -160,21 +160,21 @@ jobs:
           sed -i '/CONFIG_LOCALVERSION/d' $DEFCONFIG
           echo 'CONFIG_LOCALVERSION="-Geeeeeker-perf"' >> $DEFCONFIG
 
-          - name: Build the kernel with ccache
-            working-directory: kernel
-            run: |
-              export CLANG_PATH=$HOME/r547379/bin
-              export PATH=${CLANG_PATH}:${PATH}
-          
-              make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
-              make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
-          
-              # 显式生成所需的镜像文件
-              make LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
-          
-              ccache --show-stats
-              ccache --show-config
-            shell: bash
+      - name: Build the kernel with ccache
+        working-directory: kernel
+        run: |
+          export CLANG_PATH=$HOME/r547379/bin
+          export PATH=${CLANG_PATH}:${PATH}
+
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
+
+          # 显式生成所需的镜像文件
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
+
+          ccache --show-stats
+          ccache --show-config
+        shell: bash
 
       # ========== 提取 USB/IP 内核模块（主机已编译） ==========
       - name: Collect USB/IP kernel modules
@@ -191,9 +191,6 @@ jobs:
 
       - name: Build usbip userspace tools in arm64 container
         run: |
-          # 将内核源码树复制一份到容器可访问的位置（用于用户态工具编译，需要内核头文件）
-          # 实际上用户态工具编译不需要整个内核树，只需要 tools/usb/usbip 目录及依赖。
-          # 但为了简化，我们挂载整个内核目录，容器内只使用 tools/usb/usbip 部分。
           mkdir -p ${{ github.workspace }}/usbip_output/{bin,libs}
 
           docker run --rm --platform linux/arm64 \
@@ -292,10 +289,10 @@ jobs:
       - name: Repack Kernel Artifacts
         id: pack
         run: |
-          # 查找镜像文件（允许不同命名）
+          # 检查镜像文件是否存在（使用更健壮的查找方式）
           IMAGE=$(find kernel/arch/arm64/boot -name "Image.gz-dtb" -o -name "Image" | head -1)
           if [ -z "$IMAGE" ]; then
-            echo "ERROR: No kernel image found!"
+            echo "ERROR: No kernel image found! Looked for Image.gz-dtb or Image."
             exit 1
           fi
           DTBO=$(find kernel/arch/arm64/boot -name "dtbo.img" | head -1)
@@ -303,6 +300,9 @@ jobs:
             echo "ERROR: dtbo.img not found!"
             exit 1
           fi
+
+          echo "Found kernel image: $IMAGE"
+          echo "Found dtbo: $DTBO"
 
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
           cp "$IMAGE" $HOME/AnyKernel3/Image.gz-dtb

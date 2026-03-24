@@ -40,7 +40,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
-          # 启用 arm64 多架构并安装交叉编译所需的开发库
+          # 添加 arm64 架构支持，以便安装交叉编译所需的开发库
           sudo dpkg --add-architecture arm64
           sudo apt-get update
           sudo apt-get install -y autoconf libtool pkg-config libudev-dev:arm64 libssl-dev:arm64 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
@@ -64,7 +64,7 @@ jobs:
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
 
-          # 追加用户提供的 CONFIG_* 项（原有内容）
+          # 追加用户提供的 CONFIG_* 项，并将 USB/IP 改为模块（=m）以便生成 .ko 文件
           cat << EOF >> $DEFCONFIG
           CONFIG_UPROBE_EVENTS=y
           CONFIG_KPROBE_EVENTS=y
@@ -126,9 +126,9 @@ jobs:
           CONFIG_TMPFS=y
           CONFIG_TMPFS_POSIX_ACL=y
           CONFIG_TMPFS_XATTR=y
-          CONFIG_USBIP_CORE=y
-          CONFIG_USBIP_VHCI_HCD=y
-          CONFIG_USBIP_HOST=y
+          CONFIG_USBIP_CORE=m
+          CONFIG_USBIP_VHCI_HCD=m
+          CONFIG_USBIP_HOST=m
           CONFIG_DOCKER=y
           CONFIG_PID_NS=y
           CONFIG_IPC_NS=y
@@ -177,17 +177,17 @@ jobs:
           ccache --show-config
         shell: bash
 
-      # ========== 编译 USB/IP 模块和用户态工具 ==========
+      # ========== 编译 USB/IP 模块和用户态工具（使用当前内核树） ==========
       - name: Build USB/IP kernel modules and userspace tools (cross-compile)
         working-directory: kernel
         run: |
-          # 确保 USB/IP 配置已生效
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
+          # 准备模块编译环境（生成必要的头文件）
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" modules_prepare
 
-          # 编译 USB/IP 内核模块
+          # 编译 USB/IP 内核模块（仅编译该目录）
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" M=drivers/usb/usbip modules
 
-          # 编译用户态工具
+          # 编译用户态工具（交叉编译）
           cd tools/usb/usbip
           ./autogen.sh
           ./configure --host=aarch64-linux-gnu \
@@ -208,7 +208,7 @@ jobs:
           # 复制 libusbip.so 库
           cp libsrc/.libs/libusbip.so.0* $GITHUB_WORKSPACE/usbip_output/libs/
 
-          # 收集动态库依赖
+          # 收集动态库依赖（参考 all-file.yml 的方法）
           cd $GITHUB_WORKSPACE/usbip_output
           BINARIES="bin/usbip bin/usbipd libs/libusbip.so.0*"
           DEPS=""
@@ -272,12 +272,12 @@ jobs:
           name: usbip-arm64-with-modules-and-deps
           path: usbip-arm64-bundle-with-modules.tar.gz
 
-      # ========== 原有打包步骤（修复路径） ==========
+      # ========== 打包内核刷写包（修正路径） ==========
       - name: Repack Kernel Artifacts
         id: pack
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
-          # 修正路径：内核镜像实际位于 kernel/arch/arm64/boot/
+          # 内核镜像实际位于 kernel/arch/arm64/boot/（而非 kernel/out/）
           cp kernel/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp kernel/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
           DEVICE="raphael"

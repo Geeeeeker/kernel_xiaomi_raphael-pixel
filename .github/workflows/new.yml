@@ -22,27 +22,33 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 集成 SukiSU-Ultra (KernelSU 第三方分支，支持非 GKI)
+      # 2. 集成 SukiSU-Ultra (KernelSU 第三方分支，支持非 GKI)
       - name: Integrate SukiSU-Ultra
         run: |
           export GIT_ASKPASS=echo
-          # 克隆正确的 SukiSU-Ultra 仓库
           git clone --depth=1 https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
-          # 将内核部分复制到 drivers/kernelsu
           cp -r SukiSU-Ultra/kernel drivers/kernelsu
-          # 在 drivers/Makefile 中添加编译入口
           echo "obj-\$(CONFIG_KERNELSU) += kernelsu/" >> drivers/Makefile
-          # 在 drivers/Kconfig 中添加配置源
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
-      # 2. 设置 QEMU 用户态支持（用于运行 arm64 Docker 容器）
+      # 3. 添加 rtl8188eus 无线网卡驱动
+      - name: Add rtl8188eus WiFi driver
+        run: |
+          export GIT_ASKPASS=echo
+          git clone --depth=1 https://github.com/Geeeeeker/android_kernel_xiaomi_sdm845.git rtl8188eus-repo
+          cp -r rtl8188eus-repo/drivers/rtl8188eus drivers/
+          echo "obj-\$(CONFIG_RTL8188EU) += rtl8188eus/" >> drivers/Makefile
+          echo 'source "drivers/rtl8188eus/Kconfig"' >> drivers/Kconfig
+          rm -rf rtl8188eus-repo
+
+      # 4. 设置 QEMU 用户态支持（用于运行 arm64 Docker 容器）
       - name: 设置 QEMU 用户态支持
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user-static binfmt-support
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
-      # 3. 设置 ccache
+      # 5. 设置 ccache
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -52,7 +58,7 @@ jobs:
             kernel-build-cache
           max-size: '10G'
 
-      # 4. 恢复 clang 工具链缓存
+      # 6. 恢复 clang 工具链缓存
       - name: Restore toolchain cache
         id: restore-clang
         uses: actions/cache/restore@v4
@@ -60,20 +66,20 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 5. 安装构建依赖
+      # 7. 安装构建依赖
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
           ccache --show-stats
 
-      # 6. 部署 clang 工具链（如果缓存未命中）
+      # 8. 部署 clang 工具链（如果缓存未命中）
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
 
-      # 7. 保存 clang 工具链缓存
+      # 9. 保存 clang 工具链缓存
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         id: cache-clang-save
@@ -82,7 +88,7 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 8. 配置内核基础参数（修改 defconfig）
+      # 10. 配置内核基础参数（修改 defconfig）
       - name: 配置内核基础参数
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
@@ -121,39 +127,34 @@ jobs:
           # 添加 Backlight 支持（解决 undefined symbol 错误）
           echo "CONFIG_BACKLIGHT_CLASS_DEVICE=y" >> $DEFCONFIG
           echo "CONFIG_BACKLIGHT_QCOM=y" >> $DEFCONFIG
-
           # 禁用模块版本控制（USB/IP 需要）
           echo "CONFIG_MODVERSIONS=n" >> $DEFCONFIG
-
           # 开启 zstd 内存压缩（ZRAM 使用 zstd）
           echo "CONFIG_ZRAM=y" >> $DEFCONFIG
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
-
           # 启用 KernelSU (SukiSU-Ultra)
           echo "CONFIG_KERNELSU=y" >> $DEFCONFIG
-
           # SukiSU-Ultra KPM 支持（非 GKI 设备需要）
           echo "CONFIG_KPM=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
-
+          # 启用 rtl8188eus WiFi 驱动（以模块形式编译）
+          echo "CONFIG_RTL8188EU=m" >> $DEFCONFIG
         shell: bash
 
-      # 9. 完整构建内核（使用 ccache）
+      # 11. 完整构建内核（使用 ccache）
       - name: Build the kernel with ccache
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
-          # 使用 ccache 编译内核
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig O=out
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo) O=out
-          # 显示 ccache 统计信息
           ccache --show-stats
           ccache --show-config
         shell: bash
 
-      # 10. 编译 USB/IP 内核模块（单独调用，确保生成 .ko）
+      # 12. 编译 USB/IP 内核模块（单独调用，确保生成 .ko）
       - name: 编译 USB/IP 内核模块 (主机)
         run: |
           export CLANG_PATH=$HOME/r547379/bin
@@ -166,12 +167,11 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             M=drivers/usb/usbip \
             modules
-          # 将生成的 .ko 文件复制到输出目录
           mkdir -p $GITHUB_WORKSPACE/usbip-out/modules
           cp out/drivers/usb/usbip/*.ko $GITHUB_WORKSPACE/usbip-out/modules/
         shell: bash
 
-      # 11. 编译 USB/IP 用户态工具（Docker 容器，arm64 环境）
+      # 13. 编译 USB/IP 用户态工具（Docker 容器，arm64 环境）
       - name: 编译 USB/IP 用户态工具 (Docker 容器)
         run: |
           mkdir -p usbip-out/{bin,libs}
@@ -198,15 +198,11 @@ jobs:
                 patchelf
               cd tools/usb/usbip
               ./autogen.sh
-              # 使用 -O1 优化，避免 -O2 可能引发的编译器崩溃
               ./configure CFLAGS=\"-O1 -Wno-error\" --prefix=/usr
-              # 单线程编译，降低内存压力
               make CFLAGS=\"-O1 -Wno-error\" -j1
-              # 复制二进制和库
               cp src/.libs/usbip /output/bin/
               cp src/.libs/usbipd /output/bin/
               cp libsrc/.libs/libusbip.so.0* /output/libs/
-              # 收集动态库依赖
               cd /output
               BINARIES=\"bin/usbip bin/usbipd libs/libusbip.so.0*\"
               DEPS=\"\"
@@ -241,42 +237,39 @@ jobs:
               echo \"USB/IP user-space tools build and collection complete.\"
             "
 
-      # 12. 打包 USB/IP 产物（内核模块 + 用户态工具）
+      # 14. 打包 USB/IP 产物（内核模块 + 用户态工具）
       - name: 打包 USB/IP 产物
         run: |
           cd usbip-out
           tar czf ../usbip-arm64-bundle.tar.gz .
           cd ..
 
-      # 13. 上传 USB/IP 捆绑包作为构建工件
+      # 15. 上传 USB/IP 捆绑包作为构建工件
       - name: 上传 USB/IP 捆绑包 (Artifact)
         uses: actions/upload-artifact@v4
         with:
           name: usbip-arm64-bundle
           path: usbip-arm64-bundle.tar.gz
 
-      # 14. 下载 SukiSU-Ultra 管理器 APK（用于随内核发布）
+      # 16. 下载 SukiSU-Ultra 管理器 APK（用于随内核发布）
       - name: Download SukiSU-Ultra Manager APK
         run: |
-          # 从 SukiSU-Ultra 的 Release 页面下载最新的管理器 APK
           LATEST_RELEASE_URL=$(curl -s https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest | grep "browser_download_url.*\.apk" | cut -d '"' -f 4)
           if [ -n "$LATEST_RELEASE_URL" ]; then
             wget -O SukiSU-Ultra-Manager.apk "$LATEST_RELEASE_URL"
           else
-            # 备用链接：使用官方 KernelSU APK（兼容性较好）
             echo "Could not fetch SukiSU-Ultra APK, falling back to official KernelSU APK"
             wget -O SukiSU-Ultra-Manager.apk https://github.com/tiann/KernelSU/releases/latest/download/KernelSU.apk
           fi
           mkdir -p $GITHUB_WORKSPACE/apk-output
           cp SukiSU-Ultra-Manager.apk $GITHUB_WORKSPACE/apk-output/
 
-      # 15. 打包 AnyKernel3 内核安装包（并将 APK 一同打包）
+      # 17. 打包 AnyKernel3 内核安装包（并将 APK 一同打包）
       - name: Repack Kernel Artifacts
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
           cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
-          # 将 APK 也放入 AnyKernel3 目录，方便刷机后安装
           cp apk-output/SukiSU-Ultra-Manager.apk $HOME/AnyKernel3/
           BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')
           COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
@@ -287,21 +280,21 @@ jobs:
           ls -lah $GITHUB_WORKSPACE/AnyKernel3
         shell: bash
 
-      # 16. 上传内核安装包作为构建工件
+      # 18. 上传内核安装包作为构建工件
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ github.workspace }}/AnyKernel3/
 
-      # 17. 上传 APK 单独作为构建工件（可选）
+      # 19. 上传 APK 单独作为构建工件（可选）
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: SukiSU-Ultra-Manager
           path: apk-output/SukiSU-Ultra-Manager.apk
 
-      # 18. 发布到 GitHub Release（仅在推送 tag 时执行）
+      # 20. 发布到 GitHub Release（仅在推送 tag 时执行）
       - name: Create Release and Upload USB/IP Bundle
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1

@@ -22,6 +22,18 @@ jobs:
         with:
           fetch-depth: 1
 
+      # NEW: 集成 KernelSU 到内核源码
+      - name: Integrate KernelSU
+        run: |
+          # 克隆 KernelSU 官方仓库（使用稳定版标签，可根据需要修改）
+          git clone --depth=1 --branch main https://github.com/tiann/KernelSU.git
+          # 将 KernelSU 的内核部分复制到 drivers/kernelsu
+          cp -r KernelSU/kernel drivers/kernelsu
+          # 在 drivers/Makefile 中添加 KernelSU 的编译入口
+          echo "obj-\$(CONFIG_KERNELSU) += kernelsu/" >> drivers/Makefile
+          # 在 drivers/Kconfig 中添加 KernelSU 的配置源
+          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+
       # 2. 设置 QEMU 用户态支持（用于运行 arm64 Docker 容器）
       - name: 设置 QEMU 用户态支持
         run: |
@@ -69,13 +81,6 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # ---------- 新增：集成 KernelSU ----------
-      - name: 集成 KernelSU
-        run: |
-          git clone --depth=1 https://github.com/tiann/KernelSU.git
-          cp -r KernelSU/kernel/* ./   # 内核源码在根目录，直接复制到当前目录
-          rm -rf KernelSU
-
       # 8. 配置内核基础参数（修改 defconfig）
       - name: 配置内核基础参数
         run: |
@@ -116,12 +121,17 @@ jobs:
           echo "CONFIG_BACKLIGHT_CLASS_DEVICE=y" >> $DEFCONFIG
           echo "CONFIG_BACKLIGHT_QCOM=y" >> $DEFCONFIG
 
-          # ---------- 新增：禁用模块版本控制（USB/IP 需要） ----------
-          sed -i '/CONFIG_MODVERSIONS/d' $DEFCONFIG
-          echo "# CONFIG_MODVERSIONS is not set" >> $DEFCONFIG
+          # NEW: 禁用模块版本控制（USB/IP 需要）
+          echo "CONFIG_MODVERSIONS=n" >> $DEFCONFIG
 
-          # ---------- 新增：开启 KernelSU ----------
-          echo "CONFIG_KSU=y" >> $DEFCONFIG
+          # NEW: 开启 zstd 内存压缩（ZRAM 使用 zstd）
+          echo "CONFIG_ZRAM=y" >> $DEFCONFIG
+          echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
+          echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
+
+          # NEW: 启用 KernelSU
+          echo "CONFIG_KERNELSU=y" >> $DEFCONFIG
+
         shell: bash
 
       # 9. 完整构建内核（使用 ccache）
@@ -262,29 +272,8 @@ jobs:
           name: ${{ env.ZIP_NAME }}
           path: ${{ github.workspace }}/AnyKernel3/
 
-      # ---------- 新增：下载 KernelSU 管理器 APK ----------
-      - name: 下载 KernelSU 管理器 APK
-        continue-on-error: true
-        uses: dawidd6/action-download-artifact@v11
-        with:
-          repo: rsuntk/KernelSU
-          workflow_conclusion: success
-          name: manager
-          workflow: build-manager.yml
-          path: manager
-
-      - name: 处理 KernelSU APK
-        run: |
-          APK_FILE=$(find manager -name "*.apk" | head -n 1)
-          if [ -n "$APK_FILE" ]; then
-            cp "$APK_FILE" ./KernelSU.apk
-            echo "KernelSU APK copied to ./KernelSU.apk"
-          else
-            echo "Warning: No APK found in manager/; skipping"
-          fi
-
       # 16. 发布到 GitHub Release（仅在推送 tag 时执行）
-      - name: Create Release and Upload Assets
+      - name: Create Release and Upload USB/IP Bundle
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
@@ -292,7 +281,4 @@ jobs:
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
-          files: |
-            usbip-arm64-bundle.tar.gz
-            KernelSU.apk
-            ${{ env.ZIP_NAME }}
+          files: usbip-arm64-bundle.tar.gz

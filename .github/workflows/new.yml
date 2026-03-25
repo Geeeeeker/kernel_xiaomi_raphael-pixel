@@ -25,8 +25,9 @@ jobs:
       # 集成 SukiSU-Ultra (KernelSU 第三方分支，支持非 GKI)
       - name: Integrate SukiSU-Ultra
         run: |
-          # 克隆 SukiSU-Ultra 仓库（使用稳定分支）
-          git clone --depth=1 --branch main https://github.com/SukiSU-Ultra/KernelSU.git
+          export GIT_ASKPASS=echo
+          # 克隆 SukiSU-Ultra 仓库（使用默认分支）
+          git clone --depth=1 https://github.com/SukiSU-Ultra/KernelSU.git
           # 将 SukiSU 的内核部分复制到 drivers/kernelsu
           cp -r KernelSU/kernel drivers/kernelsu
           # 在 drivers/Makefile 中添加编译入口

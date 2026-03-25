@@ -3,12 +3,10 @@ name: Continues testing
 on:
   push:
     branches: [ "**" ]
-  pull_request:
-    branches: [ "**" ]
-  # 可选：当推送 tag 时触发 Release
-  push:
     tags:
       - 'v*'
+  pull_request:
+    branches: [ "**" ]
 
 jobs:
   build:
@@ -18,21 +16,20 @@ jobs:
       KBUILD_BUILD_HOST: KREMLIN
 
     steps:
-      # 1. 设置 QEMU 用户态支持（用于运行 arm64 Docker 容器）
-      - name: 设置 QEMU 用户态支持
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
-          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
-    steps:
       # 1. 检出仓库（内核源码位于根目录）
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # 3. 设置 ccache 缓存
+      # 2. 设置 QEMU 用户态支持（用于运行 arm64 Docker 容器）
+      - name: 设置 QEMU 用户态支持
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
+      # 3. 设置 ccache
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -74,7 +71,6 @@ jobs:
 
       # 8. 配置内核基础参数（修改 defconfig）
       - name: 配置内核基础参数
-        working-directory: kernel
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
           # 原有配置
@@ -116,7 +112,6 @@ jobs:
 
       # 9. 完整构建内核（使用 ccache）
       - name: Build the kernel with ccache
-        working-directory: kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
@@ -130,9 +125,9 @@ jobs:
 
       # 10. 编译 USB/IP 内核模块（单独调用，确保生成 .ko）
       - name: 编译 USB/IP 内核模块 (主机)
-        working-directory: kernel
         run: |
-          export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          export CLANG_PATH=$HOME/r547379/bin
+          export PATH=${CLANG_PATH}:${PATH}
           make -j$(nproc --all) \
             ARCH=arm64 \
             LLVM=1 \
@@ -144,15 +139,16 @@ jobs:
           # 将生成的 .ko 文件复制到输出目录
           mkdir -p $GITHUB_WORKSPACE/usbip-out/modules
           cp out/drivers/usb/usbip/*.ko $GITHUB_WORKSPACE/usbip-out/modules/
+        shell: bash
 
       # 11. 编译 USB/IP 用户态工具（Docker 容器，arm64 环境）
       - name: 编译 USB/IP 用户态工具 (Docker 容器)
         run: |
           mkdir -p usbip-out/{bin,libs}
           docker run --rm --platform linux/arm64 \
-            -v ${{ github.workspace }}/kernel:/kernel-src \
+            -v ${{ github.workspace }}:/workspace \
             -v ${{ github.workspace }}/usbip-out:/output \
-            -w /kernel-src \
+            -w /workspace \
             arm64v8/ubuntu:22.04 \
             bash -c "
               set -e
@@ -232,7 +228,6 @@ jobs:
 
       # 14. 打包 AnyKernel3 内核安装包
       - name: Repack Kernel Artifacts
-        working-directory: kernel
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
           cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/

@@ -22,16 +22,16 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 集成 KernelSU 到内核源码
-      - name: Integrate KernelSU
+      # 集成 SukiSU-Ultra (KernelSU 第三方分支，支持非 GKI)
+      - name: Integrate SukiSU-Ultra
         run: |
-          # 克隆 KernelSU 官方仓库（使用稳定版标签，可根据需要修改）
-          git clone --depth=1 --branch main https://github.com/tiann/KernelSU.git
-          # 将 KernelSU 的内核部分复制到 drivers/kernelsu
+          # 克隆 SukiSU-Ultra 仓库（使用稳定分支）
+          git clone --depth=1 --branch main https://github.com/SukiSU-Ultra/KernelSU.git
+          # 将 SukiSU 的内核部分复制到 drivers/kernelsu
           cp -r KernelSU/kernel drivers/kernelsu
-          # 在 drivers/Makefile 中添加 KernelSU 的编译入口
+          # 在 drivers/Makefile 中添加编译入口
           echo "obj-\$(CONFIG_KERNELSU) += kernelsu/" >> drivers/Makefile
-          # 在 drivers/Kconfig 中添加 KernelSU 的配置源
+          # 在 drivers/Kconfig 中添加配置源
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
       # 2. 设置 QEMU 用户态支持（用于运行 arm64 Docker 容器）
@@ -129,7 +129,7 @@ jobs:
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
 
-          # 启用 KernelSU
+          # 启用 KernelSU (SukiSU-Ultra)
           echo "CONFIG_KERNELSU=y" >> $DEFCONFIG
 
         shell: bash
@@ -249,12 +249,31 @@ jobs:
           name: usbip-arm64-bundle
           path: usbip-arm64-bundle.tar.gz
 
-      # 14. 打包 AnyKernel3 内核安装包
+      # 14. 下载 SukiSU-Ultra 管理器 APK（用于随内核发布）
+      - name: Download SukiSU-Ultra Manager APK
+        run: |
+          # 从 SukiSU-Ultra 的 Release 页面下载最新的管理器 APK
+          # 这里使用 GitHub API 获取最新 release 的下载链接
+          LATEST_RELEASE_URL=$(curl -s https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest | grep "browser_download_url.*\.apk" | cut -d '"' -f 4)
+          if [ -n "$LATEST_RELEASE_URL" ]; then
+            wget -O SukiSU-Ultra-Manager.apk "$LATEST_RELEASE_URL"
+          else
+            # 备用链接：使用官方 KernelSU APK（兼容）
+            echo "Could not fetch SukiSU-Ultra APK, falling back to official KernelSU APK"
+            wget -O SukiSU-Ultra-Manager.apk https://github.com/tiann/KernelSU/releases/latest/download/KernelSU.apk
+          fi
+          # 创建 APK 输出目录
+          mkdir -p $GITHUB_WORKSPACE/apk-output
+          cp SukiSU-Ultra-Manager.apk $GITHUB_WORKSPACE/apk-output/
+
+      # 15. 打包 AnyKernel3 内核安装包（并将 APK 一同打包）
       - name: Repack Kernel Artifacts
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
           cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
+          # 将 APK 也放入 AnyKernel3 目录，方便刷机后安装
+          cp apk-output/SukiSU-Ultra-Manager.apk $HOME/AnyKernel3/
           BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')
           COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
           ZIP_NAME="${BRANCH}-${COMMIT_HASH}.zip"
@@ -264,14 +283,21 @@ jobs:
           ls -lah $GITHUB_WORKSPACE/AnyKernel3
         shell: bash
 
-      # 15. 上传内核安装包作为构建工件
+      # 16. 上传内核安装包作为构建工件
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ github.workspace }}/AnyKernel3/
 
-      # 16. 发布到 GitHub Release（仅在推送 tag 时执行）
+      # 17. 上传 APK 单独作为构建工件（可选）
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SukiSU-Ultra-Manager
+          path: apk-output/SukiSU-Ultra-Manager.apk
+
+      # 18. 发布到 GitHub Release（仅在推送 tag 时执行）
       - name: Create Release and Upload USB/IP Bundle
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
@@ -280,4 +306,6 @@ jobs:
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
-          files: usbip-arm64-bundle.tar.gz
+          files: |
+            usbip-arm64-bundle.tar.gz
+            apk-output/SukiSU-Ultra-Manager.apk

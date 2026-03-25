@@ -69,14 +69,14 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # ---------- 新增：集成 KernelSU ----------
+      # 8. 集成 KernelSU
       - name: 集成 KernelSU
         run: |
           git clone --depth=1 https://github.com/tiann/KernelSU.git
           cp -r KernelSU/kernel/* ./
           rm -rf KernelSU
 
-      # 8. 配置内核基础参数（修改 defconfig）
+      # 9. 配置内核基础参数（修改 defconfig）
       - name: 配置内核基础参数
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
@@ -115,14 +115,15 @@ jobs:
           # 添加 Backlight 支持（解决 undefined symbol 错误）
           echo "CONFIG_BACKLIGHT_CLASS_DEVICE=y" >> $DEFCONFIG
           echo "CONFIG_BACKLIGHT_QCOM=y" >> $DEFCONFIG
+          # ---------- 禁用模块版本控制（USB/IP 需要） ----------
+          sed -i '/CONFIG_MODVERSIONS/d' $DEFCONFIG
+          echo "# CONFIG_MODVERSIONS is not set" >> $DEFCONFIG
           # ---------- KernelSU 配置 ----------
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           # ---------- SELinux 宽容模式 ----------
-          # 启用 SELinux bootparam 并设置默认值为 permissive
           echo "CONFIG_SECURITY_SELINUX=y" >> $DEFCONFIG
           echo "CONFIG_SECURITY_SELINUX_BOOTPARAM=y" >> $DEFCONFIG
           echo "CONFIG_SECURITY_SELINUX_BOOTPARAM_VALUE=0" >> $DEFCONFIG
-          # 在内核命令行添加 androidboot.selinux=permissive
           if grep -q "^CONFIG_CMDLINE=" $DEFCONFIG; then
             if ! grep -q "androidboot.selinux=permissive" $DEFCONFIG; then
               sed -i 's/^CONFIG_CMDLINE="\(.*\)"$/CONFIG_CMDLINE="\1 androidboot.selinux=permissive"/' $DEFCONFIG
@@ -130,28 +131,36 @@ jobs:
           else
             echo 'CONFIG_CMDLINE="androidboot.selinux=permissive"' >> $DEFCONFIG
           fi
+          # ---------- ZSTD 压缩支持 ----------
+          echo "CONFIG_ZSTD_COMPRESS=y" >> $DEFCONFIG
+          echo "CONFIG_ZSTD_DECOMPRESS=y" >> $DEFCONFIG
+          # ---------- ZRAM 内存压缩 ----------
+          echo "CONFIG_ZRAM=y" >> $DEFCONFIG
+          echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
+          # ---------- ZSWAP 交换缓存 ----------
+          echo "CONFIG_ZSWAP=y" >> $DEFCONFIG
+          echo "CONFIG_ZSWAP_COMPRESSOR_DEFAULT_ZSTD=y" >> $DEFCONFIG
+          # ---------- 交换支持 ----------
+          echo "CONFIG_SWAP=y" >> $DEFCONFIG
         shell: bash
 
-      # 9. 完整构建内核（使用 ccache）
+      # 10. 完整构建内核（使用 ccache）【已添加 ARCH=arm64】
       - name: Build the kernel with ccache
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig O=out
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo) O=out
+          make ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig O=out
+          make ARCH=arm64 LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo) O=out
           ccache --show-stats
           ccache --show-config
         shell: bash
 
-      # 10. 编译 USB/IP 内核模块（单独调用，确保生成 .ko）
+      # 11. 编译 USB/IP 内核模块（单独调用，确保生成 .ko）
       - name: 编译 USB/IP 内核模块 (主机)
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
-          make -j$(nproc --all) \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
+          make ARCH=arm64 LLVM=1 LLVM_IAS=1 -j$(nproc --all) \
             O=out \
             CROSS_COMPILE=aarch64-linux-gnu- \
             M=drivers/usb/usbip \
@@ -160,7 +169,7 @@ jobs:
           cp out/drivers/usb/usbip/*.ko $GITHUB_WORKSPACE/usbip-out/modules/
         shell: bash
 
-      # 11. 编译 USB/IP 用户态工具（Docker 容器，arm64 环境）
+      # 12. 编译 USB/IP 用户态工具（Docker 容器，arm64 环境）
       - name: 编译 USB/IP 用户态工具 (Docker 容器)
         run: |
           mkdir -p usbip-out/{bin,libs}
@@ -225,21 +234,21 @@ jobs:
               echo \"USB/IP user-space tools build and collection complete.\"
             "
 
-      # 12. 打包 USB/IP 产物（内核模块 + 用户态工具）
+      # 13. 打包 USB/IP 产物（内核模块 + 用户态工具）
       - name: 打包 USB/IP 产物
         run: |
           cd usbip-out
           tar czf ../usbip-arm64-bundle.tar.gz .
           cd ..
 
-      # 13. 上传 USB/IP 捆绑包作为构建工件
+      # 14. 上传 USB/IP 捆绑包作为构建工件
       - name: 上传 USB/IP 捆绑包 (Artifact)
         uses: actions/upload-artifact@v4
         with:
           name: usbip-arm64-bundle
           path: usbip-arm64-bundle.tar.gz
 
-      # 14. 打包 AnyKernel3 内核安装包
+      # 15. 打包 AnyKernel3 内核安装包
       - name: Repack Kernel Artifacts
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
@@ -254,14 +263,14 @@ jobs:
           ls -lah $GITHUB_WORKSPACE/AnyKernel3
         shell: bash
 
-      # 15. 上传内核安装包作为构建工件
+      # 16. 上传内核安装包作为构建工件
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ github.workspace }}/AnyKernel3/
 
-      # ---------- 新增：下载 KernelSU 管理器 APK ----------
+      # 17. 下载 KernelSU 管理器 APK
       - name: 下载 KernelSU 管理器 APK
         continue-on-error: true
         uses: dawidd6/action-download-artifact@v11
@@ -281,7 +290,7 @@ jobs:
             echo "Warning: No APK found in manager/; skipping"
           fi
 
-      # 16. 发布到 GitHub Release（仅在推送 tag 时执行）
+      # 18. 发布到 GitHub Release（仅在推送 tag 时执行）
       - name: Create Release and Upload Assets
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1

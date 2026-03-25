@@ -133,6 +133,11 @@ jobs:
           # 启用 KernelSU (SukiSU-Ultra)
           echo "CONFIG_KERNELSU=y" >> $DEFCONFIG
 
+          # SukiSU-Ultra KPM 支持（非 GKI 设备需要）
+          echo "CONFIG_KPM=y" >> $DEFCONFIG
+          echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
+          echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
+
         shell: bash
 
       # 9. 完整构建内核（使用 ccache）

@@ -2,10 +2,6 @@ name: Continues testing
 
 on:
   push:
-    branches:
-      - '**'
-    tags:
-      - '*'
   pull_request:
 
 jobs:
@@ -14,11 +10,11 @@ jobs:
     env:
       KBUILD_BUILD_USER: NATO66613
       KBUILD_BUILD_HOST: KREMLIN
-
     steps:
-      - name: Clone kernel source manually
-        run: |
-          git clone --depth=1 -b 16.0 https://github.com/Geeeeeker/kernel_xiaomi_raphael-pixel.git kernel
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -39,7 +35,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools lld
+          sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
           ccache --show-stats
 
       - name: Deploy Clang
@@ -55,335 +51,79 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      - name: Configure kernel options (LXC/Docker + user defined + USB/IP as modules)
-        working-directory: kernel
+      # 新增步骤：配置内核基础参数
+      - name: 配置内核基础参数
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
+          # 原有配置
+          echo "CONFIG_MODULES=y" >> $DEFCONFIG
+          echo "CONFIG_KPROBES=y" >> $DEFCONFIG
+          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
+          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
+          echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
+          sed -i 's/CONFIG_LTO=y/CONFIG_LTO=n/' $DEFCONFIG
+          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' $DEFCONFIG
+          sed -i 's/CONFIG_THINLTO=y/CONFIG_THINLTO=n/' $DEFCONFIG
+          echo "CONFIG_LTO_NONE=y" >> $DEFCONFIG
+          echo "CONFIG_CC_WERROR=n" >> $DEFCONFIG
+          echo "CONFIG_BPF_JIT=y" >> $DEFCONFIG
+          echo "# CONFIG_BPF_JIT_ALWAYS_ON is not set" >> $DEFCONFIG
+          echo "CONFIG_BPF_SYSCALL=y" >> $DEFCONFIG
+          # 新增配置
+          echo "CONFIG_SYSVIPC=y" >> $DEFCONFIG
+          echo "CONFIG_SYSVIPC_SYSCTL=y" >> $DEFCONFIG
+          echo "CONFIG_SYSVIPC_COMPAT=y" >> $DEFCONFIG
+          echo "CONFIG_EPOLL=y" >> $DEFCONFIG
+          echo "CONFIG_EVENTFD=y" >> $DEFCONFIG
+          echo "CONFIG_SIGNALFD=y" >> $DEFCONFIG
+          echo "CONFIG_INOTIFY_USER=y" >> $DEFCONFIG
+          echo "CONFIG_SHMEM=y" >> $DEFCONFIG
+          echo "CONFIG_TMPFS=y" >> $DEFCONFIG
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> $DEFCONFIG
+          echo "CONFIG_TMPFS_XATTR=y" >> $DEFCONFIG
+          # USB/IP 配置
+          echo "CONFIG_USBIP_CORE=m" >> $DEFCONFIG
+          echo "CONFIG_USBIP_VHCI_HCD=m" >> $DEFCONFIG
+          echo "CONFIG_USBIP_HOST=m" >> $DEFCONFIG
+          # 允许 section mismatch 警告而不中止编译
+          echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y" >> $DEFCONFIG
+          # 添加 Backlight 支持（解决 undefined symbol 错误）
+          echo "CONFIG_BACKLIGHT_CLASS_DEVICE=y" >> $DEFCONFIG
+          echo "CONFIG_BACKLIGHT_QCOM=y" >> $DEFCONFIG
+        shell: bash
 
-          # 先删除可能存在的旧定义，避免冲突
-          for opt in SYSVIPC SYSVIPC_SYSCTL SYSVIPC_COMPAT LOCALVERSION USBIP_CORE USBIP_VHCI_HCD USBIP_HOST; do
-            sed -i "/^#\?CONFIG_$opt/d" $DEFCONFIG
-          done
-
-          cat << EOF >> $DEFCONFIG
-          CONFIG_UPROBE_EVENTS=y
-          CONFIG_KPROBE_EVENTS=y
-          CONFIG_KPROBES=y
-          CONFIG_HAVE_KPROBES=y
-          CONFIG_KPROBE_EVENT=y
-          CONFIG_KALLSYMS=y
-          CONFIG_UPROBES=y
-          CONFIG_MMU=y
-          CONFIG_PERF_EVENTS=y
-          CONFIG_UPROBE_EVENT=y
-          CONFIG_BPF=y
-          CONFIG_BPF_EVENTS=y
-          CONFIG_BPF_JIT=y
-          CONFIG_DEBUG_INFO_BTF=y
-          CONFIG_HAVE_BPF_JIT=y
-          CONFIG_NF_NAT_IPV6=y
-          CONFIG_IP6_NF_TARGET_MASQUERADE=y
-          CONFIG_NETFILTER_XT_TARGET_CHECKSUM=y
-          CONFIG_FHANDLE=y
-          CONFIG_UNIX_DIAG=y
-          CONFIG_PACKET_DIAG=y
-          CONFIG_NETLINK_DIAG=y
-          CONFIG_VLAN_8021Q=y
-          CONFIG_NET_L3_MASTER_DEV=y
-          CONFIG_NET_NS=y
-          CONFIG_KEYS=y
-          CONFIG_NETFILTER_XT_MARK=y
-          CONFIG_NF_NAT=y
-          CONFIG_NF_NAT_IPV4=y
-          CONFIG_NF_NAT_NEEDED=y
-          CONFIG_SECCOMP_FILTER=y
-          CONFIG_MEMCG_SWAP_ENABLED=y
-          CONFIG_IOSCHED_CFQ=y
-          CONFIG_CGROUP_PERF=y
-          CONFIG_FAIR_GROUP_SCHED=y
-          CONFIG_VXLAN=y
-          CONFIG_CRYPTO=y
-          CONFIG_CRYPTO_AEAD=y
-          CONFIG_CRYPTO_SEQIV=y
-          CONFIG_CRYPTO_GHASH=y
-          CONFIG_XFRM=y
-          CONFIG_XFRM_ALGO=y
-          CONFIG_INET_XFRM_MODE_TRANSPORT=y
-          CONFIG_NF_NAT_FTP=y
-          CONFIG_NF_NAT_TFTP=y
-          CONFIG_AUFS_FS=y
-          CONFIG_DM_THIN_PROVISIONING=y
-          CONFIG_BPF_CGROUP_DEVICE=y
-          CONFIG_MACVLAN=y
-          CONFIG_SYSVIPC=y
-          CONFIG_SYSVIPC_SYSCTL=y
-          CONFIG_SYSVIPC_COMPAT=y
-          CONFIG_EPOLL=y
-          CONFIG_EVENTFD=y
-          CONFIG_SIGNALFD=y
-          CONFIG_INOTIFY_USER=y
-          CONFIG_SHMEM=y
-          CONFIG_TMPFS=y
-          CONFIG_TMPFS_POSIX_ACL=y
-          CONFIG_TMPFS_XATTR=y
-          # USB 核心支持必须为 y，否则 USBIP 模块无法编译
-          CONFIG_USB=y
-          CONFIG_USB_COMMON=y
-          CONFIG_USB_ARCH_HAS_HCD=y
-          CONFIG_USB_SUPPORT=y
-          CONFIG_MODULES=y
-          CONFIG_SECTION_MISMATCH_WARN_ONLY=y
-          CONFIG_MODVERSIONS=y
-          CONFIG_USBIP_CORE=m
-          CONFIG_USBIP_VHCI_HCD=m
-          CONFIG_USBIP_HOST=m
-          CONFIG_DOCKER=y
-          CONFIG_PID_NS=y
-          CONFIG_IPC_NS=y
-          CONFIG_UTS_NS=y
-          CONFIG_VETH=y
-          CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
-          CONFIG_NETFILTER_XT_MATCH_IPVS=y
-          CONFIG_POSIX_MQUEUE=y
-          CONFIG_CGROUP_PIDS=y
-          CONFIG_BLK_DEV_THROTTLING=y
-          CONFIG_CGROUP_PERF=y
-          CONFIG_VXLAN=y
-          CONFIG_CGROUP_HUGETLB=y
-          CONFIG_NET_CLS_CGROUP=y
-          CONFIG_CGROUP_NET_PRIO=y
-          CONFIG_IP_VS=y
-          CONFIG_IP_VS_NFCT=y
-          CONFIG_IP_VS_PROTO_TCP=y
-          CONFIG_IP_VS_PROTO_UDP=y
-          CONFIG_IP_VS_RR=y
-          CONFIG_SECURITY_APPARMOR=y
-          EOF
-
-          # 设置 LOCALVERSION
-          echo 'CONFIG_LOCALVERSION="-Geeeeeker-perf"' >> $DEFCONFIG
-
-      - name: Build the kernel with ccache
-        working-directory: kernel
+      - name: Build the kernel with `ccache`
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
-
-          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
-          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
-
-          # 显式生成所需的镜像文件
-          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" Image.gz-dtb dtbo.img -j$(nproc)
-
+          # Use ccache explicitly
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
+          # Show ccache stats after build
           ccache --show-stats
           ccache --show-config
         shell: bash
 
-      # ========== 强制启用模块支持、USB/IP 为模块、MODVERSIONS 和 SECTION_MISMATCH_WARN_ONLY ==========
-      - name: Force kernel config for modules
-        working-directory: kernel
-        run: |
-          # 确保 CONFIG_MODULES=y
-          sed -i 's/# CONFIG_MODULES is not set/CONFIG_MODULES=y/' out/.config
-          # 确保 USBIP 为 m
-          sed -i 's/CONFIG_USBIP_CORE=y/CONFIG_USBIP_CORE=m/' out/.config
-          sed -i 's/CONFIG_USBIP_VHCI_HCD=y/CONFIG_USBIP_VHCI_HCD=m/' out/.config
-          sed -i 's/CONFIG_USBIP_HOST=y/CONFIG_USBIP_HOST=m/' out/.config
-          # 删除可能存在的禁用行
-          sed -i '/^# CONFIG_USBIP_CORE is not set/d' out/.config
-          sed -i '/^# CONFIG_USBIP_VHCI_HCD is not set/d' out/.config
-          sed -i '/^# CONFIG_USBIP_HOST is not set/d' out/.config
-          # 添加 MODVERSIONS
-          sed -i '/# CONFIG_MODVERSIONS is not set/d' out/.config
-          echo 'CONFIG_MODVERSIONS=y' >> out/.config
-          # 添加 section mismatch 警告降级
-          sed -i '/^# CONFIG_SECTION_MISMATCH_WARN_ONLY is not set/d' out/.config
-          echo 'CONFIG_SECTION_MISMATCH_WARN_ONLY=y' >> out/.config
-
-          # 验证
-          grep -E "CONFIG_MODULES|CONFIG_USBIP|CONFIG_MODVERSIONS|CONFIG_SECTION_MISMATCH_WARN_ONLY" out/.config
-
-          # 重新运行 olddefconfig 和 prepare
-          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
-          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" prepare
-          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" scripts
-
-      # ========== 编译 USB/IP 内核模块（仅编译该目录，不触发全局构建） ==========
-      - name: Build USB/IP kernel modules
-        working-directory: kernel
-        run: |
-          export CLANG_PATH=$HOME/r547379/bin
-          export PATH=${CLANG_PATH}:${PATH}
-          if ! command -v ld.lld &> /dev/null; then
-            sudo apt-get update && sudo apt-get install -y lld
-          fi
-
-          echo "=== USBIP config from out/.config ==="
-          grep CONFIG_USBIP out/.config || true
-
-          echo "=== Building USB/IP modules only ==="
-          make O=out LLVM=1 LLVM_IAS=1 CC="ccache clang" LD=ld.lld M=drivers/usb/usbip modules -B V=1 || {
-            echo "ERROR: USB/IP modules compilation failed"
-            exit 1
-          }
-
-          echo "=== Checking generated .ko files ==="
-          find out -name '*.ko' | grep -i usbip || echo "No .ko files found"
-          if ! find out -name '*.ko' | grep -q -i usbip; then
-            echo "ERROR: USB/IP modules not built."
-            exit 1
-          fi
-
-      # ========== 收集 USB/IP 内核模块 ==========
-      - name: Collect USB/IP kernel modules
-        run: |
-          mkdir -p usbip_output/modules
-          find kernel/out -name '*.ko' | grep -i usbip | xargs -I {} cp {} usbip_output/modules/ || true
-          if [ -z "$(ls -A usbip_output/modules/)" ]; then
-            echo "ERROR: No USB/IP kernel modules found!"
-            exit 1
-          fi
-          echo "USB/IP kernel modules collected:"
-          ls -l usbip_output/modules/
-
-      # ========== 使用 Docker 容器编译 USB/IP 用户态工具（arm64） ==========
-      - name: Set up QEMU for multi-arch
-        run: |
-          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
-      - name: Build usbip userspace tools in arm64 container
-        run: |
-          mkdir -p usbip_output/{bin,libs}
-
-          docker run --rm --platform linux/arm64 \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            arm64v8/ubuntu:24.04 \
-            bash -c "
-              set -e
-              export DEBIAN_FRONTEND=noninteractive
-
-              apt update
-              apt install -y \
-                build-essential \
-                autoconf \
-                libtool \
-                pkg-config \
-                libudev-dev \
-                libssl-dev \
-                flex \
-                bison \
-                wget \
-                file \
-                kmod
-
-              cd kernel/tools/usb/usbip
-
-              ./autogen.sh
-              ./configure \
-                CFLAGS=\"-Wno-error -Wno-error=stringop-truncation\" \
-                --with-tcp-wrappers=no
-              make -j\$(nproc)
-
-              cp src/.libs/usbip /workspace/usbip_output/bin/
-              cp src/.libs/usbipd /workspace/usbip_output/bin/
-              cp libsrc/.libs/libusbip.so.0* /workspace/usbip_output/libs/
-
-              cd /workspace/usbip_output
-              BINARIES=\"bin/usbip bin/usbipd libs/libusbip.so.0*\"
-              DEPS=\"\"
-
-              for file in \$BINARIES; do
-                if [ -f \"\$file\" ]; then
-                  needed=\$(readelf -d \"\$file\" | grep NEEDED | awk '{print \$5}' | tr -d '[]' || true)
-                  for lib in \$needed; do
-                    if [[ \"\$DEPS\" != *\"\$lib\"* ]]; then
-                      DEPS=\"\$DEPS \$lib\"
-                    fi
-                  done
-                fi
-              done
-
-              for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
-                libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1)
-                if [ -n \"\$libpath\" ]; then
-                  cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
-                  for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
-                    cp -n \"\$reallib\" libs/ 2>/dev/null || true
-                  done
-                fi
-              done
-
-              ld_linux=\"/lib/ld-linux-aarch64.so.1\"
-              if [ -f \"\$ld_linux\" ]; then
-                cp -P \"\$ld_linux\" libs/
-              fi
-
-              echo \"USB/IP userspace tools build complete.\"
-            "
-
-      - name: Package USB/IP artifacts
-        run: |
-          cd usbip_output
-          tar czf ../usbip-arm64-bundle-with-modules.tar.gz .
-          cd ..
-
-      - name: Upload USB/IP bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: usbip-arm64-with-modules-and-deps
-          path: usbip-arm64-bundle-with-modules.tar.gz
-
-      # ========== 打包内核刷写包 ==========
       - name: Repack Kernel Artifacts
-        id: pack
         run: |
-          IMAGE=$(find kernel/out/arch/arm64/boot -name "Image.gz-dtb" -o -name "Image" | head -1)
-          if [ -z "$IMAGE" ]; then
-            echo "ERROR: No kernel image found in kernel/out/arch/arm64/boot/"
-            exit 1
-          fi
-          DTBO=$(find kernel/out/arch/arm64/boot -name "dtbo.img" | head -1)
-          if [ -z "$DTBO" ]; then
-            echo "ERROR: dtbo.img not found in kernel/out/arch/arm64/boot/"
-            exit 1
-          fi
-
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
-          cp "$IMAGE" $HOME/AnyKernel3/Image.gz-dtb
-          cp "$DTBO" $HOME/AnyKernel3/dtbo.img
-
-          DEVICE="raphael"
-          ANDROID_VER="16.0"
-          ZIP_NAME="anykernel3-${DEVICE}-${ANDROID_VER}.zip"
+          cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
+          cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
+          # Determine branch name and commit hash (first 6 characters)
+          BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')
+          COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
+          ZIP_NAME="${BRANCH}-${COMMIT_HASH}.zip"
+          echo $ZIP_NAME
+          # Export ZIP_NAME for later steps
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-          echo "DEVICE=${DEVICE}" >> $GITHUB_ENV
-          echo "ANDROID_VER=${ANDROID_VER}" >> $GITHUB_ENV
-
-          cd $HOME/AnyKernel3
-          zip -r9 ${ZIP_NAME} * -x .git README.md *placeholder
-          mv ${ZIP_NAME} $GITHUB_WORKSPACE/
-          cd $GITHUB_WORKSPACE
+          # Move entire AnyKernel3 directory to workspace
+          mv "$HOME/AnyKernel3" "$GITHUB_WORKSPACE/AnyKernel3"
+          # Verify contents of AnyKernel3 in workspace
+          ls -lah $GITHUB_WORKSPACE/AnyKernel3
+        shell: bash
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
-          path: ${{ github.workspace }}/${{ env.ZIP_NAME }}
-
-      - name: Create Release and Upload Asset
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          body: |
-            Kernel for ${{ env.DEVICE }} (Android ${{ env.ANDROID_VER }})
-            Built from commit ${{ github.sha }}
-          files: |
-            ${{ github.workspace }}/${{ env.ZIP_NAME }}
-            ${{ github.workspace }}/usbip-arm64-bundle-with-modules.tar.gz
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ github.workspace }}/AnyKernel3/

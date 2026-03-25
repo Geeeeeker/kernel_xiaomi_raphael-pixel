@@ -31,12 +31,11 @@ jobs:
           echo "obj-\$(CONFIG_KERNELSU) += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
+      # 3. 添加 rtl8188eus 无线网卡驱动（明确指定 master 分支）
       - name: Add rtl8188eus WiFi driver
         run: |
           export GIT_ASKPASS=echo
-          # 明确指定克隆 master 分支
           git clone --depth=1 --branch master https://github.com/Geeeeeker/android_kernel_xiaomi_sdm845.git rtl8188eus-repo
-          # 检查驱动目录是否存在
           if [ -d "rtl8188eus-repo/drivers/rtl8188eus" ]; then
             cp -r rtl8188eus-repo/drivers/rtl8188eus drivers/
             echo "obj-\$(CONFIG_RTL8188EU) += rtl8188eus/" >> drivers/Makefile
@@ -177,7 +176,7 @@ jobs:
           cp out/drivers/usb/usbip/*.ko $GITHUB_WORKSPACE/usbip-out/modules/
         shell: bash
 
-      # 13. 编译 USB/IP 用户态工具（Docker 容器，arm64 环境）
+      # 13. 编译 USB/IP 用户态工具（Docker 容器，arm64 环境）- 使用 -O0 和 ulimit 修复
       - name: 编译 USB/IP 用户态工具 (Docker 容器)
         run: |
           mkdir -p usbip-out/{bin,libs}
@@ -190,6 +189,7 @@ jobs:
             bash -c "
               set -e
               export DEBIAN_FRONTEND=noninteractive
+              ulimit -s unlimited
               apt update
               apt install -y \
                 build-essential \
@@ -204,8 +204,11 @@ jobs:
                 patchelf
               cd tools/usb/usbip
               ./autogen.sh
-              ./configure CFLAGS=\"-O1 -Wno-error\" --prefix=/usr
-              make CFLAGS=\"-O1 -Wno-error\" -j1
+              # 使用 -O0 完全禁用优化，避免 gcc 内部错误
+              ./configure CFLAGS=\"-O0 -Wno-error\" --prefix=/usr
+              # 单线程编译
+              make CFLAGS=\"-O0 -Wno-error\" -j1
+              # 复制二进制和库
               cp src/.libs/usbip /output/bin/
               cp src/.libs/usbipd /output/bin/
               cp libsrc/.libs/libusbip.so.0* /output/libs/

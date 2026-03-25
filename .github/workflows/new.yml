@@ -108,6 +108,8 @@ jobs:
           # 添加 Backlight 支持（解决 undefined symbol 错误）
           echo "CONFIG_BACKLIGHT_CLASS_DEVICE=y" >> $DEFCONFIG
           echo "CONFIG_BACKLIGHT_QCOM=y" >> $DEFCONFIG
+          # 启用模块版本控制（USB/IP 需要）
+          echo "CONFIG_MODVERSIONS=y" >> $DEFCONFIG
         shell: bash
 
       # 9. 完整构建内核（使用 ccache）

@@ -2,7 +2,13 @@ name: Continues testing
 
 on:
   push:
+    branches: [ "**" ]
   pull_request:
+    branches: [ "**" ]
+  # 可选：当推送 tag 时触发 Release
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   build:
@@ -10,12 +16,22 @@ jobs:
     env:
       KBUILD_BUILD_USER: NATO66613
       KBUILD_BUILD_HOST: KREMLIN
+
+    steps:
+      # 1. 设置 QEMU 用户态支持（用于运行 arm64 Docker 容器）
+      - name: 设置 QEMU 用户态支持
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
+      # 3. 设置 ccache 缓存
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -25,6 +41,7 @@ jobs:
             kernel-build-cache
           max-size: '10G'
 
+      # 4. 恢复 clang 工具链缓存
       - name: Restore toolchain cache
         id: restore-clang
         uses: actions/cache/restore@v4
@@ -32,17 +49,20 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
+      # 5. 安装构建依赖
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
           ccache --show-stats
 
+      # 6. 部署 clang 工具链（如果缓存未命中）
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
 
+      # 7. 保存 clang 工具链缓存
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         id: cache-clang-save
@@ -51,8 +71,9 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 新增步骤：配置内核基础参数
+      # 8. 配置内核基础参数（修改 defconfig）
       - name: 配置内核基础参数
+        working-directory: kernel
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
           # 原有配置
@@ -92,38 +113,152 @@ jobs:
           echo "CONFIG_BACKLIGHT_QCOM=y" >> $DEFCONFIG
         shell: bash
 
-      - name: Build the kernel with `ccache`
+      # 9. 完整构建内核（使用 ccache）
+      - name: Build the kernel with ccache
+        working-directory: kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
-          # Use ccache explicitly
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
-          # Show ccache stats after build
+          # 使用 ccache 编译内核
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig O=out
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo) O=out
+          # 显示 ccache 统计信息
           ccache --show-stats
           ccache --show-config
         shell: bash
 
+      # 10. 编译 USB/IP 内核模块（单独调用，确保生成 .ko）
+      - name: 编译 USB/IP 内核模块 (主机)
+        working-directory: kernel
+        run: |
+          export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          make -j$(nproc --all) \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            O=out \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            M=drivers/usb/usbip \
+            modules
+          # 将生成的 .ko 文件复制到输出目录
+          mkdir -p $GITHUB_WORKSPACE/usbip-out/modules
+          cp out/drivers/usb/usbip/*.ko $GITHUB_WORKSPACE/usbip-out/modules/
+
+      # 11. 编译 USB/IP 用户态工具（Docker 容器，arm64 环境）
+      - name: 编译 USB/IP 用户态工具 (Docker 容器)
+        run: |
+          mkdir -p usbip-out/{bin,libs}
+          docker run --rm --platform linux/arm64 \
+            -v ${{ github.workspace }}/kernel:/kernel-src \
+            -v ${{ github.workspace }}/usbip-out:/output \
+            -w /kernel-src \
+            arm64v8/ubuntu:22.04 \
+            bash -c "
+              set -e
+              export DEBIAN_FRONTEND=noninteractive
+              apt update
+              apt install -y \
+                build-essential \
+                autoconf \
+                libtool \
+                pkg-config \
+                libudev-dev \
+                libssl-dev \
+                flex \
+                bison \
+                file \
+                patchelf
+              cd tools/usb/usbip
+              ./autogen.sh
+              # 传递 CFLAGS，禁用所有警告为错误
+              ./configure CFLAGS=\"-Wno-error\" --prefix=/usr
+              # 再次确保 make 时也使用 CFLAGS
+              make CFLAGS=\"-Wno-error\" -j\$(nproc)
+              # 复制二进制和库
+              cp src/.libs/usbip /output/bin/
+              cp src/.libs/usbipd /output/bin/
+              cp libsrc/.libs/libusbip.so.0* /output/libs/
+              # 收集动态库依赖
+              cd /output
+              BINARIES=\"bin/usbip bin/usbipd libs/libusbip.so.0*\"
+              DEPS=\"\"
+              for file in \$BINARIES; do
+                if [ -f \"\$file\" ]; then
+                  echo \"Collecting dependencies for \$file...\"
+                  needed=\$(readelf -d \"\$file\" | grep NEEDED | awk '{print \$5}' | tr -d '[]' || true)
+                  for lib in \$needed; do
+                    if [[ \"\$DEPS\" != *\"\$lib\"* ]]; then
+                      DEPS=\"\$DEPS \$lib\"
+                    fi
+                  done
+                fi
+              done
+              # 复制库文件
+              for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
+                echo \"Searching for library: \$lib\"
+                libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1 || true)
+                if [ -n \"\$libpath\" ]; then
+                  echo \"Found: \$libpath\"
+                  cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
+                  for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
+                    cp -n \"\$reallib\" libs/ 2>/dev/null || true
+                  done
+                else
+                  echo \"Warning: library \$lib not found\"
+                fi
+              done
+              # 复制动态链接器
+              ld_linux=\"/lib/ld-linux-aarch64.so.1\"
+              if [ -f \"\$ld_linux\" ]; then
+                cp -P \"\$ld_linux\" libs/
+              fi
+              echo \"USB/IP user-space tools build and collection complete.\"
+            "
+
+      # 12. 打包 USB/IP 产物（内核模块 + 用户态工具）
+      - name: 打包 USB/IP 产物
+        run: |
+          cd usbip-out
+          tar czf ../usbip-arm64-bundle.tar.gz .
+          cd ..
+
+      # 13. 上传 USB/IP 捆绑包作为构建工件
+      - name: 上传 USB/IP 捆绑包 (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: usbip-arm64-bundle
+          path: usbip-arm64-bundle.tar.gz
+
+      # 14. 打包 AnyKernel3 内核安装包
       - name: Repack Kernel Artifacts
+        working-directory: kernel
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
           cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
-          # Determine branch name and commit hash (first 6 characters)
           BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')
           COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
           ZIP_NAME="${BRANCH}-${COMMIT_HASH}.zip"
           echo $ZIP_NAME
-          # Export ZIP_NAME for later steps
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-          # Move entire AnyKernel3 directory to workspace
           mv "$HOME/AnyKernel3" "$GITHUB_WORKSPACE/AnyKernel3"
-          # Verify contents of AnyKernel3 in workspace
           ls -lah $GITHUB_WORKSPACE/AnyKernel3
         shell: bash
 
+      # 15. 上传内核安装包作为构建工件
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ github.workspace }}/AnyKernel3/
+
+      # 16. 发布到 GitHub Release（仅在推送 tag 时执行）
+      - name: Create Release and Upload USB/IP Bundle
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: usbip-arm64-bundle.tar.gz

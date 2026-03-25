@@ -22,7 +22,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      # NEW: 集成 KernelSU 到内核源码
+      # 集成 KernelSU 到内核源码
       - name: Integrate KernelSU
         run: |
           # 克隆 KernelSU 官方仓库（使用稳定版标签，可根据需要修改）
@@ -121,15 +121,15 @@ jobs:
           echo "CONFIG_BACKLIGHT_CLASS_DEVICE=y" >> $DEFCONFIG
           echo "CONFIG_BACKLIGHT_QCOM=y" >> $DEFCONFIG
 
-          # NEW: 禁用模块版本控制（USB/IP 需要）
+          # 禁用模块版本控制（USB/IP 需要）
           echo "CONFIG_MODVERSIONS=n" >> $DEFCONFIG
 
-          # NEW: 开启 zstd 内存压缩（ZRAM 使用 zstd）
+          # 开启 zstd 内存压缩（ZRAM 使用 zstd）
           echo "CONFIG_ZRAM=y" >> $DEFCONFIG
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
 
-          # NEW: 启用 KernelSU
+          # 启用 KernelSU
           echo "CONFIG_KERNELSU=y" >> $DEFCONFIG
 
         shell: bash
@@ -170,6 +170,7 @@ jobs:
         run: |
           mkdir -p usbip-out/{bin,libs}
           docker run --rm --platform linux/arm64 \
+            --memory=4g \
             -v ${{ github.workspace }}:/workspace \
             -v ${{ github.workspace }}/usbip-out:/output \
             -w /workspace \
@@ -191,10 +192,10 @@ jobs:
                 patchelf
               cd tools/usb/usbip
               ./autogen.sh
-              # 传递 CFLAGS，禁用所有警告为错误
-              ./configure CFLAGS=\"-Wno-error\" --prefix=/usr
-              # 再次确保 make 时也使用 CFLAGS
-              make CFLAGS=\"-Wno-error\" -j\$(nproc)
+              # 使用 -O1 优化，避免 -O2 可能引发的编译器崩溃
+              ./configure CFLAGS=\"-O1 -Wno-error\" --prefix=/usr
+              # 单线程编译，降低内存压力
+              make CFLAGS=\"-O1 -Wno-error\" -j1
               # 复制二进制和库
               cp src/.libs/usbip /output/bin/
               cp src/.libs/usbipd /output/bin/
@@ -214,7 +215,6 @@ jobs:
                   done
                 fi
               done
-              # 复制库文件
               for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
                 echo \"Searching for library: \$lib\"
                 libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1 || true)
@@ -228,7 +228,6 @@ jobs:
                   echo \"Warning: library \$lib not found\"
                 fi
               done
-              # 复制动态链接器
               ld_linux=\"/lib/ld-linux-aarch64.so.1\"
               if [ -f \"\$ld_linux\" ]; then
                 cp -P \"\$ld_linux\" libs/

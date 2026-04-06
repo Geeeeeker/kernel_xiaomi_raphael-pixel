@@ -147,14 +147,14 @@ jobs:
           # 启用 rtl8188eus WiFi 驱动（以模块形式编译）
           echo "CONFIG_RTL8188EU=m" >> $DEFCONFIG
           # 基础框架
-          CONFIG_USB_SERIAL=y
-          CONFIG_USB_SERIAL_CONSOLE=y
-          CONFIG_USB_SERIAL_GENERIC=y
+          echo "CONFIG_USB_SERIAL=y" >> $DEFCONFIG
+          echo "CONFIG_USB_SERIAL_CONSOLE=y" >> $DEFCONFIG
+          echo "CONFIG_USB_SERIAL_GENERIC=y" >> $DEFCONFIG
           # 核心四大金刚 (覆盖 95% 以上市售模块)
-          CONFIG_USB_SERIAL_CH341=y
-          CONFIG_USB_SERIAL_FTDI_SIO=y
-          CONFIG_USB_SERIAL_CP210X=y
-          CONFIG_USB_SERIAL_PL2303=y
+          echo "CONFIG_USB_SERIAL_CH341=y" >> $DEFCONFIG
+          echo "CONFIG_USB_SERIAL_FTDI_SIO=y" >> $DEFCONFIG
+          echo "CONFIG_USB_SERIAL_CP210X=y" >> $DEFCONFIG
+          echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
         shell: bash
 
       # 11. 完整构建内核（使用 ccache）

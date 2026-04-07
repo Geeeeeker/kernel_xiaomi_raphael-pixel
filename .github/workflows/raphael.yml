@@ -218,11 +218,29 @@ jobs:
             sed -i 's/#define ksu_flush_icache(start, end) __flush_icache_range/#define ksu_flush_icache(start, end) flush_icache_range/g' "$PATCH_MEM"
           fi
           
-          # 10. 禁用 file_wrapper.c，因为 4.14 内核缺少必要的 API
-          # 从 Kbuild 中删除 infra/file_wrapper.o 行
-          sed -i '/infra\/file_wrapper.o/d' drivers/kernelsu/Kbuild
-          # 也可以将 file_wrapper.c 的内容清空，以防万一
-          echo "// Disabled for 4.14 kernel due to missing APIs" > drivers/kernelsu/infra/file_wrapper.c
+          # 10. 禁用 file_wrapper.c（避免大量不兼容的 API）
+          if grep -q "infra/file_wrapper.o" drivers/kernelsu/Kbuild; then
+            sed -i '/infra\/file_wrapper.o/d' drivers/kernelsu/Kbuild
+          fi
+          # 清空 file_wrapper.c 内容（以防万一）
+          > drivers/kernelsu/infra/file_wrapper.c
+          
+          # 11. 修复 event_queue.c 中的 __poll_t 类型（4.14 使用 unsigned int）
+          EVENT_H="drivers/kernelsu/infra/event_queue.h"
+          EVENT_C="drivers/kernelsu/infra/event_queue.c"
+          if [ -f "$EVENT_H" ]; then
+            sed -i 's/__poll_t/unsigned int/g' "$EVENT_H"
+            # 添加必要的头文件
+            if ! grep -q "#include <linux/poll.h>" "$EVENT_H"; then
+              sed -i '1i #include <linux/poll.h>' "$EVENT_H"
+            fi
+          fi
+          if [ -f "$EVENT_C" ]; then
+            sed -i 's/__poll_t/unsigned int/g' "$EVENT_C"
+            if ! grep -q "#include <linux/poll.h>" "$EVENT_C"; then
+              sed -i '1i #include <linux/poll.h>' "$EVENT_C"
+            fi
+          fi
 
       - name: Build the kernel
         run: |

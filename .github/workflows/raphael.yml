@@ -173,7 +173,7 @@ jobs:
           make -j$(nproc) ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out M=drivers/rtl8188eus modules
           cp out/drivers/rtl8188eus/8188eu.ko modules-package/
 
-      - name: 编译 USB/IP 用户态工具 (使用 Clang 修复段错误)
+      - name: 编译 USB/IP 用户态工具 (使用 Clang)
         run: |
           mkdir -p usbip-out/{bin,libs}
           docker run --rm \
@@ -246,18 +246,11 @@ jobs:
           name: usbip-arm64-bundle
           path: usbip-arm64-bundle.tar.gz
 
-      - name: Download KernelSU Manager APK
-        run: |
-          wget -O KernelSU-Manager.apk https://github.com/tiann/KernelSU/releases/download/v0.9.5/KernelSU_v0.9.5_11375-release.apk
-          mkdir -p apk-output
-          cp KernelSU-Manager.apk apk-output/
-
       - name: Repack Kernel Artifacts with modules
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
           cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
-          cp apk-output/KernelSU-Manager.apk $HOME/AnyKernel3/
           mkdir -p $HOME/AnyKernel3/modules
           cp modules-package/*.ko $HOME/AnyKernel3/modules/
           cat > $HOME/AnyKernel3/anykernel.sh << 'EOF'
@@ -315,12 +308,6 @@ jobs:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_NAME }}
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: KernelSU-Manager
-          path: apk-output/KernelSU-Manager.apk
-
       - name: Create Release and Upload USB/IP Bundle
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
@@ -331,5 +318,4 @@ jobs:
           prerelease: false
           files: |
             usbip-arm64-bundle.tar.gz
-            apk-output/KernelSU-Manager.apk
             ${{ env.ZIP_NAME }}

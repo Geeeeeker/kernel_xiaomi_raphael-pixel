@@ -28,7 +28,7 @@ jobs:
           export GIT_ASKPASS=echo
           git clone --depth=1 https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
           cp -r SukiSU-Ultra/kernel drivers/kernelsu
-          echo "obj-\$(CONFIG_KERNELSU) += kernelsu/" >> drivers/Makefile
+          echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
       # 3. 添加 rtl8188eus 无线网卡驱动（明确指定 master 分支）
@@ -138,8 +138,8 @@ jobs:
           echo "CONFIG_ZRAM=y" >> $DEFCONFIG
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
-          # 启用 KernelSU (SukiSU-Ultra)
-          echo "CONFIG_KERNELSU=y" >> $DEFCONFIG
+          # 启用 KernelSU (SukiSU-Ultra) —— 修正为 CONFIG_KSU
+          echo "CONFIG_KSU=y" >> $DEFCONFIG
           # SukiSU-Ultra KPM 支持（非 GKI 设备需要）
           echo "CONFIG_KPM=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG

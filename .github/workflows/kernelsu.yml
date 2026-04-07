@@ -235,7 +235,8 @@ jobs:
             "policy/feature.c" \
             "selinux/rules.c" \
             "selinux/sepolicy.c" \
-            "selinux/selinux.c"
+            "selinux/selinux.c" \
+            "other/manual_su.c"
           do
             if [ -f "drivers/kernelsu/$file" ]; then
               : > "drivers/kernelsu/$file"

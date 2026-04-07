@@ -22,18 +22,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 2. 手动集成 KernelSU v0.9.5（不运行 setup.sh，避免修改 binder）
-      - name: Integrate KernelSU v0.9.5 (Manual, without binder patches)
-        run: |
-          export GIT_ASKPASS=echo
-          git clone --depth=1 --branch v0.9.5 https://github.com/tiann/KernelSU.git
-          mkdir -p drivers/kernelsu
-          cp -r KernelSU/kernel/* drivers/kernelsu/
-          echo "obj-y += kernelsu/" >> drivers/Makefile
-          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-          rm -rf KernelSU
-
-      # 3. 添加 rtl8188eus 无线网卡驱动
+      # 2. 添加 rtl8188eus 无线网卡驱动
       - name: Add rtl8188eus WiFi driver
         run: |
           export GIT_ASKPASS=echo
@@ -48,14 +37,14 @@ jobs:
           fi
           rm -rf rtl8188eus-repo
 
-      # 4. 设置 QEMU 用户态支持
+      # 3. 设置 QEMU 用户态支持（用于运行 arm64 Docker 容器）
       - name: 设置 QEMU 用户态支持
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user-static binfmt-support
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
-      # 5. 设置 ccache
+      # 4. 设置 ccache
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -65,7 +54,7 @@ jobs:
             kernel-build-cache
           max-size: '10G'
 
-      # 6. 恢复 clang 工具链缓存
+      # 5. 恢复 clang 工具链缓存
       - name: Restore toolchain cache
         id: restore-clang
         uses: actions/cache/restore@v4
@@ -73,20 +62,20 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 7. 安装构建依赖
+      # 6. 安装构建依赖
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
           ccache --show-stats
 
-      # 8. 部署 clang 工具链（如果缓存未命中）
+      # 7. 部署 clang 工具链（如果缓存未命中）
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
 
-      # 9. 保存 clang 工具链缓存
+      # 8. 保存 clang 工具链缓存
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         id: cache-clang-save
@@ -95,7 +84,7 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 10. 配置内核基础参数（修改 defconfig），同时禁用 Android Binder 驱动以避免编译错误
+      # 9. 配置内核基础参数（修改 defconfig）
       - name: 配置内核基础参数
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
@@ -131,23 +120,16 @@ jobs:
           echo "CONFIG_USBIP_HOST=m" >> $DEFCONFIG
           # 允许 section mismatch 警告而不中止编译
           echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y" >> $DEFCONFIG
-          # 添加 Backlight 支持
+          # 添加 Backlight 支持（解决 undefined symbol 错误）
           echo "CONFIG_BACKLIGHT_CLASS_DEVICE=y" >> $DEFCONFIG
           echo "CONFIG_BACKLIGHT_QCOM=y" >> $DEFCONFIG
           # 禁用模块版本控制（USB/IP 需要）
           echo "CONFIG_MODVERSIONS=n" >> $DEFCONFIG
-          # 开启 zstd 内存压缩
+          # 开启 zstd 内存压缩（ZRAM 使用 zstd）
           echo "CONFIG_ZRAM=y" >> $DEFCONFIG
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
-          # KernelSU v0.9.5 配置
-          echo "CONFIG_KSU=y" >> $DEFCONFIG
-          echo "CONFIG_DEBUG_KERNEL=y" >> $DEFCONFIG
-          echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
-          echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
-          echo "CONFIG_IKCONFIG=y" >> $DEFCONFIG
-          echo "CONFIG_IKCONFIG_PROC=y" >> $DEFCONFIG
-          # 启用 rtl8188eus WiFi 驱动
+          # 启用 rtl8188eus WiFi 驱动（以模块形式编译）
           echo "CONFIG_RTL8188EU=m" >> $DEFCONFIG
           # 基础 USB Serial 框架
           echo "CONFIG_USB_SERIAL=y" >> $DEFCONFIG
@@ -159,15 +141,23 @@ jobs:
           echo "CONFIG_USB_SERIAL_CP210X=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
 
-          # ***** 关键修改：禁用 Android Binder 驱动，彻底避免编译错误 *****
-          echo "# CONFIG_ANDROID is not set" >> $DEFCONFIG
-          echo "# CONFIG_ANDROID_BINDER_IPC is not set" >> $DEFCONFIG
-          # 删除任何可能存在的旧配置
-          sed -i '/CONFIG_ANDROID_BINDER_IPC/d' $DEFCONFIG
-          sed -i '/CONFIG_ANDROID/d' $DEFCONFIG
+          # ----- 添加 Android Binder 支持 -----
+          echo "CONFIG_ANDROID=y" >> $DEFCONFIG
+          echo "CONFIG_ANDROID_BINDER_IPC=y" >> $DEFCONFIG
+          echo "CONFIG_ANDROID_BINDER_DEVICES=\"binder,hwbinder,vndbinder\"" >> $DEFCONFIG
+
+          # ----- 禁用 TRACING / FTRACE（避免 binder 编译错误）-----
+          echo "# CONFIG_TRACING is not set" >> $DEFCONFIG
+          echo "# CONFIG_FTRACE is not set" >> $DEFCONFIG
+
+          # 删除任何可能存在的 KernelSU 配置（确保不开启）
+          sed -i '/CONFIG_KSU/d' $DEFCONFIG
+          sed -i '/CONFIG_DEBUG_KERNEL/d' $DEFCONFIG
+          sed -i '/CONFIG_KALLSYMS/d' $DEFCONFIG
+          sed -i '/CONFIG_IKCONFIG/d' $DEFCONFIG
         shell: bash
 
-      # 11. 完整构建内核（使用 ccache）
+      # 10. 完整构建内核（使用 ccache）
       - name: Build the kernel with ccache
         run: |
           export CLANG_PATH=$HOME/r547379/bin
@@ -178,7 +168,7 @@ jobs:
           ccache --show-config
         shell: bash
 
-      # 12. 编译 USB/IP 内核模块
+      # 11. 编译 USB/IP 内核模块（单独调用，确保生成 .ko）
       - name: 编译 USB/IP 内核模块 (主机)
         run: |
           export CLANG_PATH=$HOME/r547379/bin
@@ -195,7 +185,7 @@ jobs:
           cp out/drivers/usb/usbip/*.ko $GITHUB_WORKSPACE/usbip-out/modules/
         shell: bash
 
-      # 13. 编译 USB/IP 用户态工具（Docker 容器）
+      # 12. 编译 USB/IP 用户态工具（Docker 容器，arm64 环境）
       - name: 编译 USB/IP 用户态工具 (Docker 容器)
         run: |
           mkdir -p usbip-out/{bin,libs}
@@ -261,21 +251,21 @@ jobs:
               echo \"USB/IP user-space tools build and collection complete.\"
             "
 
-      # 14. 打包 USB/IP 产物
+      # 13. 打包 USB/IP 产物（内核模块 + 用户态工具）
       - name: 打包 USB/IP 产物
         run: |
           cd usbip-out
           tar czf ../usbip-arm64-bundle.tar.gz .
           cd ..
 
-      # 15. 上传 USB/IP 捆绑包作为构建工件
+      # 14. 上传 USB/IP 捆绑包作为构建工件
       - name: 上传 USB/IP 捆绑包 (Artifact)
         uses: actions/upload-artifact@v4
         with:
           name: usbip-arm64-bundle
           path: usbip-arm64-bundle.tar.gz
 
-      # 16. 下载 KernelSU v0.9.5 官方管理器 APK
+      # 15. 下载 KernelSU v0.9.5 官方管理器 APK（用户要求保留）
       - name: Download KernelSU Manager APK
         run: |
           APK_URL="https://github.com/tiann/KernelSU/releases/download/v0.9.5/KernelSU_v0.9.5_11872-release.apk"
@@ -283,39 +273,45 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/apk-output
           cp KernelSU-Manager.apk $GITHUB_WORKSPACE/apk-output/
 
-      # 17. 打包 AnyKernel3 内核安装包（包含 APK）
+      # 16. 打包 AnyKernel3 内核安装包（包含 APK 和 rtl8188.ko 模块）
       - name: Repack Kernel Artifacts
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
           cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
           cp apk-output/KernelSU-Manager.apk $HOME/AnyKernel3/
+          # 复制 rtl8188.ko 模块（注意实际路径和文件名）
+          if [ -f "out/drivers/rtl8188eus/rtl8188.ko" ]; then
+            cp out/drivers/rtl8188eus/rtl8188.ko $HOME/AnyKernel3/
+            echo "rtl8188.ko copied successfully"
+          else
+            echo "Warning: rtl8188.ko not found at out/drivers/rtl8188eus/rtl8188.ko"
+          fi
           BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')
           COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
           ZIP_NAME="${BRANCH}-${COMMIT_HASH}.zip"
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-          # 进入 AnyKernel3 目录打包，确保 zip 根目录包含 META-INF 和 anykernel.sh
           cd $HOME/AnyKernel3
           zip -r9 $GITHUB_WORKSPACE/${ZIP_NAME} .
           cd $GITHUB_WORKSPACE
           ls -lah ${ZIP_NAME}
         shell: bash
 
-      # 18. 上传内核安装包作为构建工件
+      # 17. 上传内核安装包作为构建工件
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ github.workspace }}/${{ env.ZIP_NAME }}
 
-      # 19. 上传 APK 单独作为构建工件（可选）
+      # 18. 上传 APK 单独作为构建工件（可选）
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: KernelSU-Manager
           path: apk-output/KernelSU-Manager.apk
 
-      # 20. 发布到 GitHub Release（仅在推送 tag 时执行）
+      # 19. 发布到 GitHub Release（仅在推送 tag 时执行）
       - name: Create Release and Upload Assets
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1

@@ -1,7 +1,7 @@
 name: Continues testing
 
 on:
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
   push:
     branches: [ "**" ]
     tags:
@@ -30,10 +30,6 @@ jobs:
           # 集成驱动代码
           cp -r SukiSU-Ultra/kernel drivers/kernelsu
           cp -r SukiSU-Ultra/uapi drivers/kernelsu/
-          
-          # 修复 sucompat.c 中的 "too many arguments" 编译错误
-          # 将 ksu_syscall_table[orig_nr](regs) 替换为 ksu_syscall_table[orig_nr]()
-          sed -i 's/ksu_syscall_table\[orig_nr\](regs)/ksu_syscall_table[orig_nr]()/g' drivers/kernelsu/feature/sucompat.c
           
           # 修改配置文件
           echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
@@ -170,14 +166,16 @@ jobs:
           echo "# CONFIG_TRACING is not set" >> $DEFCONFIG
           echo "# CONFIG_FTRACE is not set" >> $DEFCONFIG
 
-      - name: Patch SukiSU for 4.14 kernel
+      - name: Comprehensive Patch for 4.14 Kernel
         run: |
           # 1. 移除 MODULE_IMPORT_NS（4.14 不支持）
           find drivers/kernelsu -name "*.c" -exec sed -i '/MODULE_IMPORT_NS/d' {} \;
           
-          # 2. 添加 syscall_fn_t 类型定义
-          if ! grep -q "typedef void (\*syscall_fn_t)" drivers/kernelsu/hook/syscall_hook.h; then
-            sed -i '1i typedef void (*syscall_fn_t)(void);' drivers/kernelsu/hook/syscall_hook.h
+          # 2. 修正 syscall_fn_t 类型定义，使其接收 struct pt_regs * 参数
+          if grep -q "typedef void (\*syscall_fn_t)(void);" drivers/kernelsu/hook/syscall_hook.h; then
+            sed -i 's/typedef void (\*syscall_fn_t)(void);/typedef long (*syscall_fn_t)(struct pt_regs *);/' drivers/kernelsu/hook/syscall_hook.h
+          elif ! grep -q "typedef long (\*syscall_fn_t)(struct pt_regs \*);" drivers/kernelsu/hook/syscall_hook.h; then
+            sed -i '1i typedef long (*syscall_fn_t)(struct pt_regs *);' drivers/kernelsu/hook/syscall_hook.h
           fi
           
           # 3. 修复 access_ok 参数个数（4.14 需要三个参数）
@@ -193,18 +191,27 @@ jobs:
             fi
           done
           
-          # 6. 为使用了 VERIFY_READ 的文件自动添加 linux/uaccess.h
-          find drivers/kernelsu -name "*.c" -exec grep -l "VERIFY_READ" {} \; | while read file; do
+          # 6. 为使用了 VERIFY_READ 或 strncpy_from_user 的文件自动添加 linux/uaccess.h
+          find drivers/kernelsu -name "*.c" -exec grep -l -E "VERIFY_READ|strncpy_from_user" {} \; | while read file; do
             if ! grep -q "#include <linux/uaccess.h>" "$file"; then
               sed -i '1i #include <linux/uaccess.h>' "$file"
             fi
           done
           
-          # 7. 修复 sucompat.c 中返回值不匹配的问题
-          # 将 ret = ksu_syscall_table[orig_nr](); 替换为 ksu_syscall_table[orig_nr](); ret = 0;
-          sed -i 's/ret = ksu_syscall_table\[orig_nr\]();/ksu_syscall_table[orig_nr](); ret = 0;/g' drivers/kernelsu/feature/sucompat.c
-          # 将 return ksu_syscall_table[orig_nr](); 替换为 ksu_syscall_table[orig_nr](); return 0;
-          sed -i 's/return ksu_syscall_table\[orig_nr\]();/ksu_syscall_table[orig_nr](); return 0;/g' drivers/kernelsu/feature/sucompat.c
+          # 7. 修复 sucompat.c 中的返回值不匹配问题（调用 syscall 时传递 regs，但此处无 regs，改为调用后返回 0）
+          sed -i 's/ret = ksu_syscall_table\[orig_nr\]();/ksu_syscall_table[orig_nr](NULL); ret = 0;/g' drivers/kernelsu/feature/sucompat.c
+          sed -i 's/return ksu_syscall_table\[orig_nr\]();/ksu_syscall_table[orig_nr](NULL); return 0;/g' drivers/kernelsu/feature/sucompat.c
+          
+          # 8. 修复 syscall_event_bridge.c 中的调用，传递 regs 参数
+          # 该文件已经传递 regs，但我们的函数定义已改为接收参数，所以无需修改调用，但需要确保函数声明一致
+          # 另外，如果文件中没有包含 uaccess.h，上面已经添加
+          
+          # 9. 注释掉 __NR_clone3 相关代码（4.14 不支持）
+          sed -i 's/ksu_register_syscall_hook(__NR_clone3, ksu_hook_clone);/\/\/ ksu_register_syscall_hook(__NR_clone3, ksu_hook_clone);/g' drivers/kernelsu/hook/syscall_hook_manager.c
+          sed -i 's/ksu_unregister_syscall_hook(__NR_clone3);/\/\/ ksu_unregister_syscall_hook(__NR_clone3);/g' drivers/kernelsu/hook/syscall_hook_manager.c
+          
+          # 10. 处理可能的其他未定义系统调用号（可选）
+          # 如果还有 __NR_xxx 未定义，可以在此添加条件编译，但先看编译结果
 
       - name: Build the kernel
         run: |

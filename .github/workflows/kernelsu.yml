@@ -368,6 +368,19 @@ jobs:
             sed -i 's/__ksu_is_allow_uid_for_current/\/\/ __ksu_is_allow_uid_for_current/g' "$KSUD_INT"
           fi
           
+          # 23. 创建缺失的 klog.h 头文件
+          KLOG_H="drivers/kernelsu/klog.h"
+          cat > "$KLOG_H" << 'EOF'
+          #ifndef _KSU_KLOG_H_
+          #define _KSU_KLOG_H_
+          #include <linux/printk.h>
+          #define ksu_log_info(fmt, ...) pr_info("KSU: " fmt, ##__VA_ARGS__)
+          #define ksu_log_err(fmt, ...) pr_err("KSU: " fmt, ##__VA_ARGS__)
+          #define ksu_log_warn(fmt, ...) pr_warn("KSU: " fmt, ##__VA_ARGS__)
+          #define ksu_log_debug(fmt, ...) pr_debug("KSU: " fmt, ##__VA_ARGS__)
+          #endif
+          EOF
+          
       - name: Build the kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin

@@ -265,13 +265,13 @@ jobs:
             sed -i 's/long (\*orig_sys_fstat)(const struct pt_regs \*)/long (*orig_sys_fstat)(struct pt_regs *)/' "$KSUD_INT"
           fi
           
-          # 13. 修复 event_queue 中的 __poll_t
-          for file in drivers/kernelsu/infra/event_queue.h drivers/kernelsu/infra/event_queue.c; do
-            if [ -f "$file" ]; then
+          # 13. 修复 __poll_t 类型（替换为 unsigned int）并添加 poll.h
+          find drivers/kernelsu -name "*.c" -o -name "*.h" | while read file; do
+            if grep -q "__poll_t" "$file"; then
               sed -i 's/__poll_t/unsigned int/g' "$file"
-              if ! grep -q "#include <linux/poll.h>" "$file"; then
-                sed -i '1i #include <linux/poll.h>' "$file"
-              fi
+            fi
+            if grep -q "poll_table" "$file" && ! grep -q "#include <linux/poll.h>" "$file"; then
+              sed -i '1i #include <linux/poll.h>' "$file"
             fi
           done
           
@@ -291,7 +291,6 @@ jobs:
             if ! grep -q "#include <linux/spinlock.h>" "$DISPATCH_C"; then
               sed -i '3i #include <linux/spinlock.h>' "$DISPATCH_C"
             fi
-            # 如果 tasklist_lock 仍然找不到，可能需要使用 current->signal-> ... 替代，但先尝试添加头文件
           fi
           
       - name: Build the kernel

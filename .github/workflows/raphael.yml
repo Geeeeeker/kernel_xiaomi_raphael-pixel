@@ -16,28 +16,21 @@ jobs:
       KBUILD_BUILD_HOST: KREMLIN
 
     steps:
-      # 1. 检出仓库
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # 2. 集成 SukiSU-Ultra（修正 uapi 路径）
       - name: Integrate SukiSU-Ultra
         run: |
           export GIT_ASKPASS=echo
           git clone --depth=1 https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
-          # 复制内核模块代码
           cp -r SukiSU-Ultra/kernel drivers/kernelsu
-          # 复制 uapi 头文件到 kernelsu 目录下，以满足 #include "uapi/xxx.h"
           cp -r SukiSU-Ultra/uapi drivers/kernelsu/
-          # 修改驱动 Makefile 和 Kconfig
           echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-          # 清理可能残留的旧头文件路径（可选）
-          rm -rf include/linux/kernelsu 2>/dev/null || true
+          echo "ccflags-y += -I\$(srctree)/drivers/kernelsu" >> drivers/kernelsu/Kbuild
 
-      # 3. 添加 rtl8188eus 驱动
       - name: Add rtl8188eus WiFi driver
         run: |
           git clone --depth=1 --branch master https://github.com/Geeeeeker/android_kernel_xiaomi_sdm845.git rtl8188eus-repo
@@ -51,14 +44,12 @@ jobs:
           fi
           rm -rf rtl8188eus-repo
 
-      # 4. 设置 QEMU 用户态支持
       - name: 设置 QEMU 用户态支持
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user-static binfmt-support
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
-      # 5. 设置 ccache
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -68,7 +59,6 @@ jobs:
             kernel-build-cache
           max-size: '10G'
 
-      # 6. 恢复 clang 工具链缓存
       - name: Restore toolchain cache
         id: restore-clang
         uses: actions/cache/restore@v4
@@ -76,20 +66,17 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 7. 安装构建依赖
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
           ccache --show-stats
 
-      # 8. 部署 clang 工具链
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
 
-      # 9. 保存 clang 工具链缓存
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         id: cache-clang-save
@@ -98,17 +85,15 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 10. 清理旧的编译输出
       - name: Clean old build output
         run: |
           rm -rf out
           mkdir -p out
 
-      # 11. 配置内核基础参数（包含禁用 tracing 以解决 binder 编译错误）
       - name: 配置内核基础参数
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
-          # 原有配置
+          # 基本配置
           echo "CONFIG_MODULES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -133,7 +118,7 @@ jobs:
           echo "CONFIG_TMPFS=y" >> $DEFCONFIG
           echo "CONFIG_TMPFS_POSIX_ACL=y" >> $DEFCONFIG
           echo "CONFIG_TMPFS_XATTR=y" >> $DEFCONFIG
-          # USB/IP 配置
+          # USB/IP
           echo "CONFIG_USBIP_CORE=m" >> $DEFCONFIG
           echo "CONFIG_USBIP_VHCI_HCD=m" >> $DEFCONFIG
           echo "CONFIG_USBIP_HOST=m" >> $DEFCONFIG
@@ -144,18 +129,17 @@ jobs:
           echo "CONFIG_ZRAM=y" >> $DEFCONFIG
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
-          # SukiSU-Ultra
+          # SukiSU
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPM=y" >> $DEFCONFIG
           echo "CONFIG_DEBUG_KERNEL=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
-          # /proc/config.gz 支持
           echo "CONFIG_IKCONFIG=y" >> $DEFCONFIG
           echo "CONFIG_IKCONFIG_PROC=y" >> $DEFCONFIG
           # rtl8188eus
           echo "CONFIG_RTL8188EU=m" >> $DEFCONFIG
-          # USB 串行驱动
+          # USB 串行
           echo "CONFIG_USB_SERIAL=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_CONSOLE=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_GENERIC=y" >> $DEFCONFIG
@@ -163,16 +147,25 @@ jobs:
           echo "CONFIG_USB_SERIAL_FTDI_SIO=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_CP210X=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
-          # Android Binder 支持
+          # Android Binder
           echo "CONFIG_ANDROID=y" >> $DEFCONFIG
           echo "CONFIG_ANDROID_BINDER_IPC=y" >> $DEFCONFIG
           echo "CONFIG_ANDROID_BINDER_DEVICES=\"binder,hwbinder,vndbinder\"" >> $DEFCONFIG
-          # 禁用 tracing 和 ftrace，避免 binder trace 编译错误
+          # 禁用 tracing
           echo "# CONFIG_TRACING is not set" >> $DEFCONFIG
           echo "# CONFIG_FTRACE is not set" >> $DEFCONFIG
-        shell: bash
 
-      # 12. 完整构建内核
+      - name: Patch SukiSU for 4.14 kernel
+        run: |
+          # 移除 MODULE_IMPORT_NS
+          if grep -q "MODULE_IMPORT_NS" drivers/kernelsu/core/init.c; then
+            sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/core/init.c
+          fi
+          # 添加 syscall_fn_t 类型定义
+          if ! grep -q "typedef void (\*syscall_fn_t)" drivers/kernelsu/hook/syscall_hook.h; then
+            sed -i '1i typedef void (*syscall_fn_t)(void);' drivers/kernelsu/hook/syscall_hook.h
+          fi
+
       - name: Build the kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
@@ -181,150 +174,102 @@ jobs:
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(nproc) O=out
           ccache --show-stats
 
-      # 13. 编译 USB/IP 内核模块
       - name: Compile USB/IP modules
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
-          make -j$(nproc) \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            O=out \
-            M=drivers/usb/usbip \
-            modules
+          make -j$(nproc) ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out M=drivers/usb/usbip modules
           mkdir -p modules-package
           cp out/drivers/usb/usbip/usbip-core.ko modules-package/
           cp out/drivers/usb/usbip/usbip-host.ko modules-package/
           cp out/drivers/usb/usbip/vhci-hcd.ko modules-package/
-          echo "=== USB/IP Module Vermagic ==="
-          modinfo modules-package/usbip-core.ko | grep vermagic
 
-      # 14. 编译 rtl8188eus 模块
       - name: Compile rtl8188eus module
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
-          make -j$(nproc) \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            O=out \
-            M=drivers/rtl8188eus \
-            modules
+          make -j$(nproc) ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out M=drivers/rtl8188eus modules
           cp out/drivers/rtl8188eus/rtl8188eus.ko modules-package/
-          echo "=== rtl8188eus Module Vermagic ==="
-          modinfo modules-package/rtl8188eus.ko | grep vermagic
 
-      # 15. 编译 USB/IP 用户态工具（Docker）
-      - name: 编译 USB/IP 用户态工具 (Docker 容器)
+      - name: 编译 USB/IP 用户态工具
         run: |
           mkdir -p usbip-out/{bin,libs}
-          docker run --rm --platform linux/arm64 \
-            --memory=4g \
-            -v ${{ github.workspace }}:/workspace \
-            -v ${{ github.workspace }}/usbip-out:/output \
-            -w /workspace \
-            arm64v8/ubuntu:22.04 \
-            bash -c "
-              set -e
-              export DEBIAN_FRONTEND=noninteractive
-              ulimit -s unlimited
-              apt update
-              apt install -y \
-                build-essential \
-                autoconf \
-                libtool \
-                pkg-config \
-                libudev-dev \
-                libssl-dev \
-                flex \
-                bison \
-                file \
-                patchelf
-              cd tools/usb/usbip
-              ./autogen.sh
-              ./configure CFLAGS=\"-O0 -Wno-error\" --prefix=/usr
-              make CFLAGS=\"-O0 -Wno-error\" -j1
-              cp src/.libs/usbip /output/bin/
-              cp src/.libs/usbipd /output/bin/
-              cp libsrc/.libs/libusbip.so.0* /output/libs/
-              cd /output
-              BINARIES=\"bin/usbip bin/usbipd libs/libusbip.so.0*\"
-              DEPS=\"\"
-              for file in \$BINARIES; do
-                if [ -f \"\$file\" ]; then
-                  needed=\$(readelf -d \"\$file\" | grep NEEDED | awk '{print \$5}' | tr -d '[]' || true)
-                  for lib in \$needed; do
-                    if [[ \"\$DEPS\" != *\"\$lib\"* ]]; then
-                      DEPS=\"\$DEPS \$lib\"
-                    fi
-                  done
-                fi
-              done
-              for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
-                libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1 || true)
-                if [ -n \"\$libpath\" ]; then
-                  cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
-                  for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
-                    cp -n \"\$reallib\" libs/ 2>/dev/null || true
-                  done
-                else
-                  echo \"Warning: library \$lib not found\"
-                fi
-              done
-              ld_linux=\"/lib/ld-linux-aarch64.so.1\"
-              if [ -f \"\$ld_linux\" ]; then
-                cp -P \"\$ld_linux\" libs/
+          docker run --rm --platform linux/arm64 --memory=4g -v ${{ github.workspace }}:/workspace -v ${{ github.workspace }}/usbip-out:/output -w /workspace arm64v8/ubuntu:22.04 bash -c "
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            ulimit -s unlimited
+            apt update
+            apt install -y build-essential autoconf libtool pkg-config libudev-dev libssl-dev flex bison file patchelf
+            cd tools/usb/usbip
+            ./autogen.sh
+            ./configure CFLAGS='-O0 -Wno-error' --prefix=/usr
+            make CFLAGS='-O0 -Wno-error' -j1
+            cp src/.libs/usbip /output/bin/
+            cp src/.libs/usbipd /output/bin/
+            cp libsrc/.libs/libusbip.so.0* /output/libs/
+            cd /output
+            BINARIES='bin/usbip bin/usbipd libs/libusbip.so.0*'
+            DEPS=''
+            for file in \$BINARIES; do
+              if [ -f \"\$file\" ]; then
+                needed=\$(readelf -d \"\$file\" | grep NEEDED | awk '{print \$5}' | tr -d '[]' || true)
+                for lib in \$needed; do
+                  if [[ \"\$DEPS\" != *\"\$lib\"* ]]; then
+                    DEPS=\"\$DEPS \$lib\"
+                  fi
+                done
               fi
-              echo \"USB/IP user-space tools build complete.\"
-            "
+            done
+            for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
+              libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1 || true)
+              if [ -n \"\$libpath\" ]; then
+                cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
+                for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
+                  cp -n \"\$reallib\" libs/ 2>/dev/null || true
+                done
+              else
+                echo \"Warning: library \$lib not found\"
+              fi
+            done
+            ld_linux='/lib/ld-linux-aarch64.so.1'
+            if [ -f \"\$ld_linux\" ]; then
+              cp -P \"\$ld_linux\" libs/
+            fi
+          "
 
-      # 16. 打包 USB/IP 用户态工具
       - name: 打包 USB/IP 用户态工具
         run: |
           cd usbip-out
           tar czf ../usbip-arm64-bundle.tar.gz .
           cd ..
 
-      # 17. 上传 USB/IP 用户态工具包
-      - name: 上传 USB/IP 捆绑包 (Artifact)
+      - name: 上传 USB/IP 捆绑包
         uses: actions/upload-artifact@v4
         with:
           name: usbip-arm64-bundle
           path: usbip-arm64-bundle.tar.gz
 
-      # 18. 下载 SukiSU-Ultra 管理器 APK
       - name: Download SukiSU-Ultra Manager APK
         run: |
           LATEST_RELEASE_URL=$(curl -s https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest | grep "browser_download_url.*\.apk" | cut -d '"' -f 4)
           if [ -n "$LATEST_RELEASE_URL" ]; then
             wget -O SukiSU-Ultra-Manager.apk "$LATEST_RELEASE_URL"
           else
-            echo "Could not fetch SukiSU-Ultra APK, falling back to official KernelSU APK"
             wget -O SukiSU-Ultra-Manager.apk https://github.com/tiann/KernelSU/releases/latest/download/KernelSU.apk
           fi
           mkdir -p apk-output
           cp SukiSU-Ultra-Manager.apk apk-output/
 
-      # 19. 打包 AnyKernel3（包含内核镜像、dtbo、APK 和所有 .ko 模块，并修改 anykernel.sh）
       - name: Repack Kernel Artifacts with modules
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
-          # 复制内核镜像
           cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
-          # 复制 APK
           cp apk-output/SukiSU-Ultra-Manager.apk $HOME/AnyKernel3/
-          # 创建 modules 目录并复制所有 .ko 文件
           mkdir -p $HOME/AnyKernel3/modules
           cp modules-package/*.ko $HOME/AnyKernel3/modules/
-          # 创建自定义 anykernel.sh 以实现模块自动安装
           cat > $HOME/AnyKernel3/anykernel.sh << 'EOF'
           #!/sbin/sh
-          # AnyKernel3 script for SukiSU-Ultra + modules
-          
-          # 设置变量
           kernel.string=SukiSU-Ultra Kernel with extra modules
           do.devicecheck=1
           do.modules=1
@@ -332,7 +277,6 @@ jobs:
           do.cleanup=1
           device.name1=raphael
           
-          # 模块安装目录（优先 vendor，如果不存在则 system）
           MODULE_DEST=""
           if [ -d /vendor/lib/modules ]; then
             MODULE_DEST=/vendor/lib/modules
@@ -342,15 +286,12 @@ jobs:
             MODULE_DEST=/system/lib/modules
           fi
           
-          # 刷写内核
           ui_print " - Flashing kernel"
           block=/dev/block/by-name/boot
           is_slot_device=1
           ramdisk_compression=auto
-          
           . /tmp/anykernel/tools/ak2-core.sh
           
-          # 复制模块文件到系统
           ui_print " - Installing kernel modules"
           for mod in modules/*.ko; do
             modname=$(basename $mod)
@@ -360,20 +301,14 @@ jobs:
             chcon u:object_r:system_file:s0 $MODULE_DEST/$modname 2>/dev/null
           done
           
-          # 可选：运行 depmod（如果可用）
           if [ -x /system/bin/depmod ]; then
-            ui_print " - Running depmod"
             /system/bin/depmod -a
           elif [ -x /sbin/depmod ]; then
-            ui_print " - Running depmod"
             /sbin/depmod -a
           fi
-
           ui_print " - Done"
           EOF
-          # 确保 anykernel.sh 可执行
           chmod +x $HOME/AnyKernel3/anykernel.sh
-          # 打包 zip
           BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')
           COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
           ZIP_NAME="${BRANCH}-${COMMIT_HASH}.zip"
@@ -381,24 +316,19 @@ jobs:
           cd $HOME/AnyKernel3
           zip -r9 $GITHUB_WORKSPACE/$ZIP_NAME . -x "*.git*" "*~" ".*"
           cd $GITHUB_WORKSPACE
-          ls -lah $ZIP_NAME
-        shell: bash
 
-      # 20. 上传内核安装包
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_NAME }}
 
-      # 21. 上传 APK 单独作为构建工件
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: SukiSU-Ultra-Manager
           path: apk-output/SukiSU-Ultra-Manager.apk
 
-      # 22. 发布到 GitHub Release（仅在推送 tag 时执行）
       - name: Create Release and Upload USB/IP Bundle
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
@@ -411,7 +341,3 @@ jobs:
             usbip-arm64-bundle.tar.gz
             apk-output/SukiSU-Ultra-Manager.apk
             ${{ env.ZIP_NAME }}
-
-            apk-output/SukiSU-Ultra-Manager.apk
-            ${{ env.ZIP_NAME }}
-

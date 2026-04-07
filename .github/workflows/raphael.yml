@@ -168,23 +168,23 @@ jobs:
 
       - name: Comprehensive Patch for 4.14 Kernel
         run: |
-          # 1. 移除 MODULE_IMPORT_NS（4.14 不支持）
+          # 1. 移除 MODULE_IMPORT_NS
           find drivers/kernelsu -name "*.c" -exec sed -i '/MODULE_IMPORT_NS/d' {} \;
           
-          # 2. 修正 syscall_fn_t 类型定义
+          # 2. 修正 syscall_fn_t 类型
           if grep -q "typedef void (\*syscall_fn_t)(void);" drivers/kernelsu/hook/syscall_hook.h; then
             sed -i 's/typedef void (\*syscall_fn_t)(void);/typedef long (*syscall_fn_t)(struct pt_regs *);/' drivers/kernelsu/hook/syscall_hook.h
           elif ! grep -q "typedef long (\*syscall_fn_t)(struct pt_regs \*);" drivers/kernelsu/hook/syscall_hook.h; then
             sed -i '1i typedef long (*syscall_fn_t)(struct pt_regs *);' drivers/kernelsu/hook/syscall_hook.h
           fi
           
-          # 3. 修复 access_ok 参数个数
+          # 3. 修复 access_ok
           find drivers/kernelsu -name "*.c" -exec sed -i 's/access_ok(/access_ok(VERIFY_READ, /g' {} \;
           
-          # 4. 修复 linux/pgtable.h -> asm/pgtable.h
+          # 4. 修复 pgtable.h
           find drivers/kernelsu -name "*.c" -exec sed -i 's/#include <linux\/pgtable.h>/#include <asm\/pgtable.h>/g' {} \;
           
-          # 5. 添加 linux/mm.h 和 linux/uaccess.h
+          # 5. 添加头文件
           find drivers/kernelsu -name "*.c" -exec grep -l "pgtable" {} \; | while read file; do
             if ! grep -q "#include <linux/mm.h>" "$file"; then
               sed -i '1i #include <linux/mm.h>' "$file"
@@ -196,17 +196,17 @@ jobs:
             fi
           done
           
-          # 6. 修复 sucompat.c 中的 const 限定符
+          # 6. 修复 sucompat.c const
           sed -i 's/ksu_syscall_table\[orig_nr\](regs)/ksu_syscall_table[orig_nr]((struct pt_regs *)regs)/g' drivers/kernelsu/feature/sucompat.c
           
-          # 7. 修复 syscall_event_bridge.c 中的类似问题
+          # 7. 修复 syscall_event_bridge.c
           find drivers/kernelsu/hook -name "*.c" -exec sed -i 's/ksu_syscall_table\[orig_nr\](regs)/ksu_syscall_table[orig_nr]((struct pt_regs *)regs)/g' {} \;
           
-          # 8. 注释掉 __NR_clone3
+          # 8. 注释 __NR_clone3
           sed -i 's/ksu_register_syscall_hook(__NR_clone3, ksu_hook_clone);/\/\/ ksu_register_syscall_hook(__NR_clone3, ksu_hook_clone);/g' drivers/kernelsu/hook/syscall_hook_manager.c
           sed -i 's/ksu_unregister_syscall_hook(__NR_clone3);/\/\/ ksu_unregister_syscall_hook(__NR_clone3);/g' drivers/kernelsu/hook/syscall_hook_manager.c
           
-          # 9. 修复 patch_memory.c 中的 __pte_to_phys、copy_to_kernel_nofault 和 __flush_icache_range
+          # 9. 修复 patch_memory.c
           PATCH_MEM="drivers/kernelsu/hook/arm64/patch_memory.c"
           if [ -f "$PATCH_MEM" ]; then
             sed -i 's/__pte_to_phys(\*pte)/(pte_pfn(*pte) << PAGE_SHIFT)/g' "$PATCH_MEM"
@@ -218,29 +218,24 @@ jobs:
             sed -i 's/#define ksu_flush_icache(start, end) __flush_icache_range/#define ksu_flush_icache(start, end) flush_icache_range/g' "$PATCH_MEM"
           fi
           
-          # 10. 禁用 file_wrapper.c（避免大量不兼容的 API）
-          if grep -q "infra/file_wrapper.o" drivers/kernelsu/Kbuild; then
-            sed -i '/infra\/file_wrapper.o/d' drivers/kernelsu/Kbuild
-          fi
-          # 清空 file_wrapper.c 内容（以防万一）
+          # 10. 禁用不兼容的 infra 文件
+          for obj in infra/file_wrapper.o infra/seccomp_cache.o; do
+            if grep -q "$obj" drivers/kernelsu/Kbuild; then
+              sed -i "/$obj/d" drivers/kernelsu/Kbuild
+            fi
+          done
           > drivers/kernelsu/infra/file_wrapper.c
+          > drivers/kernelsu/infra/seccomp_cache.c
           
-          # 11. 修复 event_queue.c 中的 __poll_t 类型（4.14 使用 unsigned int）
-          EVENT_H="drivers/kernelsu/infra/event_queue.h"
-          EVENT_C="drivers/kernelsu/infra/event_queue.c"
-          if [ -f "$EVENT_H" ]; then
-            sed -i 's/__poll_t/unsigned int/g' "$EVENT_H"
-            # 添加必要的头文件
-            if ! grep -q "#include <linux/poll.h>" "$EVENT_H"; then
-              sed -i '1i #include <linux/poll.h>' "$EVENT_H"
+          # 11. 修复 event_queue.c 中的 __poll_t
+          for file in drivers/kernelsu/infra/event_queue.h drivers/kernelsu/infra/event_queue.c; do
+            if [ -f "$file" ]; then
+              sed -i 's/__poll_t/unsigned int/g' "$file"
+              if ! grep -q "#include <linux/poll.h>" "$file"; then
+                sed -i '1i #include <linux/poll.h>' "$file"
+              fi
             fi
-          fi
-          if [ -f "$EVENT_C" ]; then
-            sed -i 's/__poll_t/unsigned int/g' "$EVENT_C"
-            if ! grep -q "#include <linux/poll.h>" "$EVENT_C"; then
-              sed -i '1i #include <linux/poll.h>' "$EVENT_C"
-            fi
-          fi
+          done
 
       - name: Build the kernel
         run: |

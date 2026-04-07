@@ -177,7 +177,6 @@ jobs:
           elif ! grep -q "typedef long (\*syscall_fn_t)(struct pt_regs \*);" "$SYSCALL_HOOK_H"; then
             sed -i '1i typedef long (*syscall_fn_t)(struct pt_regs *);' "$SYSCALL_HOOK_H"
           fi
-          # 确保 pt_regs 声明可见
           if ! grep -q "#include <asm/ptrace.h>" "$SYSCALL_HOOK_H"; then
             sed -i '1i #include <asm/ptrace.h>' "$SYSCALL_HOOK_H"
           fi
@@ -188,7 +187,7 @@ jobs:
           # 4. 修复 pgtable.h
           find drivers/kernelsu -name "*.c" -exec sed -i 's/#include <linux\/pgtable.h>/#include <asm\/pgtable.h>/g' {} \;
           
-          # 5. 添加头文件
+          # 5. 添加缺失头文件
           find drivers/kernelsu -name "*.c" -exec grep -l "pgtable" {} \; | while read file; do
             if ! grep -q "#include <linux/mm.h>" "$file"; then
               sed -i '1i #include <linux/mm.h>' "$file"
@@ -222,7 +221,7 @@ jobs:
             sed -i 's/#define ksu_flush_icache(start, end) __flush_icache_range/#define ksu_flush_icache(start, end) flush_icache_range/g' "$PATCH_MEM"
           fi
           
-          # 10. 清空不兼容的源文件（避免编译）
+          # 10. 清空所有不兼容或高级功能的源文件（避免编译）
           for file in \
             "infra/file_wrapper.c" \
             "infra/seccomp_cache.c" \
@@ -236,37 +235,64 @@ jobs:
             "selinux/rules.c" \
             "selinux/sepolicy.c" \
             "selinux/selinux.c" \
-            "other/manual_su.c"
+            "other/manual_su.c" \
+            "kpm/compact.c"
           do
             if [ -f "drivers/kernelsu/$file" ]; then
               : > "drivers/kernelsu/$file"
             fi
           done
           
-          # 11. 修改 Kbuild，注释掉 selinux 相关对象（避免链接空文件）
-          KBUILD="drivers/kernelsu/Kbuild"
-          if [ -f "$KBUILD" ]; then
-            sed -i '/selinux\/rules.o/d' "$KBUILD"
-            sed -i '/selinux\/sepolicy.o/d' "$KBUILD"
-            sed -i '/selinux\/selinux.o/d' "$KBUILD"
-          fi
+          # 11. 重写 Kbuild，只保留最小核心功能
+          cat > drivers/kernelsu/Kbuild << 'EOF'
+          ccflags-y += -I$(srctree)/drivers/kernelsu
+          obj-$(CONFIG_KSU) += kernelsu.o
+          
+          # 核心必须
+          kernelsu-objs := core/init.o
+          kernelsu-objs += feature/kernel_umount.o
+          kernelsu-objs += feature/sulog.o
+          kernelsu-objs += feature/sucompat.o
+          kernelsu-objs += feature/adb_root.o
+          
+          # hook 基本支持
+          kernelsu-objs += hook/lsm_hook.o
+          kernelsu-objs += hook/setuid_hook.o
+          kernelsu-objs += hook/syscall_event_bridge.o
+          kernelsu-objs += hook/syscall_hook_manager.o
+          kernelsu-objs += hook/tp_marker.o
+          ifeq ($(CONFIG_ARM64),y)
+          kernelsu-objs += hook/arm64/patch_memory.o
+          kernelsu-objs += hook/arm64/syscall_hook.o
+          else ifeq ($(CONFIG_X86_64),y)
+          kernelsu-objs += hook/x86_64/patch_memory.o
+          kernelsu-objs += hook/x86_64/syscall_hook.o
+          endif
+          
+          # 基本运行时
+          kernelsu-objs += infra/event_queue.o
+          kernelsu-objs += runtime/boot_event.o
+          kernelsu-objs += runtime/ksud_integration.o
+          
+          # 移除所有对 policy/manager/selinux/kpm 的依赖
+          ccflags-y += -DCONFIG_KSU_DISABLE_MANAGER=1
+          ccflags-y += -DCONFIG_KSU_DISABLE_POLICY=1
+          ccflags-y += -DKSU_NO_SELINUX=1
+          ccflags-y += -Wno-strict-prototypes -Wno-int-conversion -Wno-gcc-compat
+          ccflags-y += -Wno-missing-prototypes -Wno-declaration-after-statement
+          EOF
           
           # 12. 修复 ksud_integration.c 中缺失的 copy_*_nofault 以及 const 不匹配
           KSUD_INT="drivers/kernelsu/runtime/ksud_integration.c"
           if [ -f "$KSUD_INT" ]; then
-            # 添加兼容宏定义（放在文件开头）
             sed -i '1i #ifndef copy_from_user_nofault\n#define copy_from_user_nofault(dst, src, size) ({ \\\n    long __ret = 0; \\\n    if (access_ok(VERIFY_READ, src, size)) { \\\n        if (copy_from_user(dst, src, size)) \\\n            __ret = -EFAULT; \\\n    } else __ret = -EFAULT; \\\n    __ret; \\\n})\n#endif\n\n#ifndef copy_to_user_nofault\n#define copy_to_user_nofault(dst, src, size) ({ \\\n    long __ret = 0; \\\n    if (access_ok(VERIFY_WRITE, dst, size)) { \\\n        if (copy_to_user(dst, src, size)) \\\n            __ret = -EFAULT; \\\n    } else __ret = -EFAULT; \\\n    __ret; \\\n})\n#endif\n' "$KSUD_INT"
-            
-            # 移除函数参数中的 const（解决函数指针类型不匹配）
             sed -i 's/ksu_sys_read(const struct pt_regs \*regs)/ksu_sys_read(struct pt_regs *regs)/' "$KSUD_INT"
             sed -i 's/ksu_sys_fstat(const struct pt_regs \*regs)/ksu_sys_fstat(struct pt_regs *regs)/' "$KSUD_INT"
-            
-            # 修改 orig_sys_read 和 orig_sys_fstat 的类型声明（去掉 const）
             sed -i 's/long (\*orig_sys_read)(const struct pt_regs \*)/long (*orig_sys_read)(struct pt_regs *)/' "$KSUD_INT"
             sed -i 's/long (\*orig_sys_fstat)(const struct pt_regs \*)/long (*orig_sys_fstat)(struct pt_regs *)/' "$KSUD_INT"
           fi
           
-          # 13. 修复 __poll_t 类型（替换为 unsigned int）并添加 poll.h
+          # 13. 修复 __poll_t 类型并添加 poll.h
           find drivers/kernelsu -name "*.c" -o -name "*.h" | while read file; do
             if grep -q "__poll_t" "$file"; then
               sed -i 's/__poll_t/unsigned int/g' "$file"
@@ -276,13 +302,12 @@ jobs:
             fi
           done
           
-          # 14. 修复 linux/minmax.h 不存在（4.14 内核没有该头文件）
+          # 14. 修复 linux/minmax.h 不存在
           find drivers/kernelsu -name "*.c" -exec sed -i 's/#include <linux\/minmax.h>/#include <linux\/kernel.h>/g' {} \;
           
-          # 15. 修复 dispatch.c 中缺失的 tasklist_lock 和 init_task 声明
+          # 15. 修复 dispatch.c 中缺失的 tasklist_lock 和 init_task
           DISPATCH_C="drivers/kernelsu/supercall/dispatch.c"
           if [ -f "$DISPATCH_C" ]; then
-            # 添加必要的头文件（放在文件开头）
             if ! grep -q "#include <linux/sched.h>" "$DISPATCH_C"; then
               sed -i '1i #include <linux/sched.h>' "$DISPATCH_C"
             fi
@@ -297,14 +322,50 @@ jobs:
           # 16. 修复 supercall.c 中的 ksys_close 和 TWA_RESUME
           SUPERCALL_C="drivers/kernelsu/supercall/supercall.c"
           if [ -f "$SUPERCALL_C" ]; then
-            # 添加 ksys_close 兼容宏
             if ! grep -q "#define ksys_close sys_close" "$SUPERCALL_C"; then
               sed -i '1i #define ksys_close sys_close' "$SUPERCALL_C"
             fi
-            # 添加 TWA_RESUME 定义（如果未定义）
             if ! grep -q "#define TWA_RESUME" "$SUPERCALL_C"; then
               sed -i '2i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' "$SUPERCALL_C"
             fi
+          fi
+          
+          # 17. 注释掉 tp_marker.c 中对 is_zygote / is_task_ksu_domain / __ksu_is_allow_uid 的调用
+          TP_MARKER="drivers/kernelsu/hook/tp_marker.c"
+          if [ -f "$TP_MARKER" ]; then
+            sed -i 's/is_zygote(/\/\/ is_zygote(/g' "$TP_MARKER"
+            sed -i 's/is_task_ksu_domain(/\/\/ is_task_ksu_domain(/g' "$TP_MARKER"
+            sed -i 's/__ksu_is_allow_uid(/\/\/ __ksu_is_allow_uid(/g' "$TP_MARKER"
+          fi
+          
+          # 18. 注释掉 setuid_hook.c 中对 ksu_seccomp_allow_cache 的调用
+          SETUID_HOOK="drivers/kernelsu/hook/setuid_hook.c"
+          if [ -f "$SETUID_HOOK" ]; then
+            sed -i 's/ksu_seccomp_allow_cache/\/\/ ksu_seccomp_allow_cache/g' "$SETUID_HOOK"
+          fi
+          
+          # 19. 注释掉 adb_root.c 中对 escape_to_root_for_adb_root 的调用
+          ADB_ROOT="drivers/kernelsu/feature/adb_root.c"
+          if [ -f "$ADB_ROOT" ]; then
+            sed -i 's/escape_to_root_for_adb_root/\/\/ escape_to_root_for_adb_root/g' "$ADB_ROOT"
+          fi
+          
+          # 20. 注释掉 sucompat.c 中对 escape_with_root_profile 的调用
+          SUCOMPAT="drivers/kernelsu/feature/sucompat.c"
+          if [ -f "$SUCOMPAT" ]; then
+            sed -i 's/escape_with_root_profile/\/\/ escape_with_root_profile/g' "$SUCOMPAT"
+          fi
+          
+          # 21. 注释掉 kernel_umount.c 中对 ksu_uid_should_umount 的调用
+          KERNEL_UMOUNT="drivers/kernelsu/feature/kernel_umount.c"
+          if [ -f "$KERNEL_UMOUNT" ]; then
+            sed -i 's/ksu_uid_should_umount/\/\/ ksu_uid_should_umount/g' "$KERNEL_UMOUNT"
+          fi
+          
+          # 22. 注释掉 ksud_integration.c 中对 ksu_manager_appid 等的调用
+          if [ -f "$KSUD_INT" ]; then
+            sed -i 's/ksu_manager_appid/\/\/ ksu_manager_appid/g' "$KSUD_INT"
+            sed -i 's/__ksu_is_allow_uid_for_current/\/\/ __ksu_is_allow_uid_for_current/g' "$KSUD_INT"
           fi
           
       - name: Build the kernel

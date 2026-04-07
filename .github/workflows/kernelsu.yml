@@ -221,7 +221,7 @@ jobs:
             sed -i 's/#define ksu_flush_icache(start, end) __flush_icache_range/#define ksu_flush_icache(start, end) flush_icache_range/g' "$PATCH_MEM"
           fi
           
-          # 10. 清空所有不兼容或高级功能的源文件（避免编译）
+          # 10. 清空所有不兼容或高级功能的源文件（包括 kernel_umount.c）
           for file in \
             "infra/file_wrapper.c" \
             "infra/seccomp_cache.c" \
@@ -236,21 +236,21 @@ jobs:
             "selinux/sepolicy.c" \
             "selinux/selinux.c" \
             "other/manual_su.c" \
-            "kpm/compact.c"
+            "kpm/compact.c" \
+            "feature/kernel_umount.c"
           do
             if [ -f "drivers/kernelsu/$file" ]; then
               : > "drivers/kernelsu/$file"
             fi
           done
           
-          # 11. 重写 Kbuild，只保留最小核心功能
+          # 11. 重写 Kbuild，只保留最小核心功能（移除 kernel_umount.o）
           cat > drivers/kernelsu/Kbuild << 'EOF'
           ccflags-y += -I$(srctree)/drivers/kernelsu
           obj-$(CONFIG_KSU) += kernelsu.o
           
           # 核心必须
           kernelsu-objs := core/init.o
-          kernelsu-objs += feature/kernel_umount.o
           kernelsu-objs += feature/sulog.o
           kernelsu-objs += feature/sucompat.o
           kernelsu-objs += feature/adb_root.o
@@ -356,19 +356,13 @@ jobs:
             sed -i 's/escape_with_root_profile/\/\/ escape_with_root_profile/g' "$SUCOMPAT"
           fi
           
-          # 21. 注释掉 kernel_umount.c 中对 ksu_uid_should_umount 的调用
-          KERNEL_UMOUNT="drivers/kernelsu/feature/kernel_umount.c"
-          if [ -f "$KERNEL_UMOUNT" ]; then
-            sed -i 's/ksu_uid_should_umount/\/\/ ksu_uid_should_umount/g' "$KERNEL_UMOUNT"
-          fi
-          
-          # 22. 注释掉 ksud_integration.c 中对 ksu_manager_appid 等的调用
+          # 21. 注释掉 ksud_integration.c 中对 ksu_manager_appid 等的调用
           if [ -f "$KSUD_INT" ]; then
             sed -i 's/ksu_manager_appid/\/\/ ksu_manager_appid/g' "$KSUD_INT"
             sed -i 's/__ksu_is_allow_uid_for_current/\/\/ __ksu_is_allow_uid_for_current/g' "$KSUD_INT"
           fi
           
-          # 23. 从源仓库复制缺失的头文件 klog.h 和 ksu.h（使用 printf 避免 heredoc 问题）
+          # 22. 从源仓库复制缺失的头文件 klog.h 和 ksu.h（使用 printf 避免 heredoc 问题）
           if [ -d "SukiSU-Ultra" ]; then
             cp SukiSU-Ultra/kernel/include/klog.h drivers/kernelsu/klog.h 2>/dev/null || true
             cp SukiSU-Ultra/uapi/ksu.h drivers/kernelsu/ksu.h 2>/dev/null || true

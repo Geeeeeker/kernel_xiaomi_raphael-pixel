@@ -230,53 +230,6 @@ jobs:
           echo "# CONFIG_TRACING is not set" >> $DEFCONFIG
           echo "# CONFIG_FTRACE is not set" >> $DEFCONFIG
 
-      - name: Patch KernelSU for 4.14 Kernel
-        run: |
-          # 移除 MODULE_IMPORT_NS
-          find drivers/kernelsu -name "*.c" -exec sed -i '/MODULE_IMPORT_NS/d' {} \;
-          # 修复 access_ok
-          find drivers/kernelsu -name "*.c" -exec sed -i 's/access_ok(/access_ok(VERIFY_READ, /g' {} \;
-          # 修复 pgtable.h
-          find drivers/kernelsu -name "*.c" -exec sed -i 's/#include <linux\/pgtable.h>/#include <asm\/pgtable.h>/g' {} \;
-          # 添加缺失的头文件
-          find drivers/kernelsu -name "*.c" -exec grep -l "pgtable" {} \; | while read file; do
-            if ! grep -q "#include <linux/mm.h>" "$file"; then
-              sed -i '1i #include <linux/mm.h>' "$file"
-            fi
-          done
-          find drivers/kernelsu -name "*.c" -exec grep -l -E "VERIFY_READ|strncpy_from_user" {} \; | while read file; do
-            if ! grep -q "#include <linux/uaccess.h>" "$file"; then
-              sed -i '1i #include <linux/uaccess.h>' "$file"
-            fi
-          done
-          # 修复 sucompat.c const
-          sed -i 's/ksu_syscall_table\[orig_nr\](regs)/ksu_syscall_table[orig_nr]((struct pt_regs *)regs)/g' drivers/kernelsu/feature/sucompat.c
-          # 修复 syscall_event_bridge.c
-          find drivers/kernelsu/hook -name "*.c" -exec sed -i 's/ksu_syscall_table\[orig_nr\](regs)/ksu_syscall_table[orig_nr]((struct pt_regs *)regs)/g' {} \;
-          # 注释 __NR_clone3
-          sed -i 's#ksu_register_syscall_hook(__NR_clone3, ksu_hook_clone);#// ksu_register_syscall_hook(__NR_clone3, ksu_hook_clone);#g' drivers/kernelsu/hook/syscall_hook_manager.c
-          sed -i 's#ksu_unregister_syscall_hook(__NR_clone3);#// ksu_unregister_syscall_hook(__NR_clone3);#g' drivers/kernelsu/hook/syscall_hook_manager.c
-          # 修复 patch_memory.c
-          PATCH_MEM="drivers/kernelsu/hook/arm64/patch_memory.c"
-          if [ -f "$PATCH_MEM" ]; then
-            sed -i 's/__pte_to_phys(\*pte)/(pte_pfn(*pte) << PAGE_SHIFT)/g' "$PATCH_MEM"
-            if ! grep -q "#include <linux/mm.h>" "$PATCH_MEM"; then
-              sed -i '1i #include <linux/mm.h>' "$PATCH_MEM"
-            fi
-            sed -i 's/ret = (int)copy_to_kernel_nofault(map, src, len);/ret = probe_kernel_write(map, src, len); if (ret) ret = -EFAULT;/g' "$PATCH_MEM"
-            sed -i 's/__flush_icache_range/flush_icache_range/g' "$PATCH_MEM"
-            sed -i 's/#define ksu_flush_icache(start, end) __flush_icache_range/#define ksu_flush_icache(start, end) flush_icache_range/g' "$PATCH_MEM"
-          fi
-          # 修复 event_queue __poll_t
-          for file in drivers/kernelsu/infra/event_queue.h drivers/kernelsu/infra/event_queue.c; do
-            if [ -f "$file" ]; then
-              sed -i 's/__poll_t/unsigned int/g' "$file"
-              if ! grep -q "#include <linux/poll.h>" "$file"; then
-                sed -i '1i #include <linux/poll.h>' "$file"
-              fi
-            fi
-          done
-
       - name: Build the kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin

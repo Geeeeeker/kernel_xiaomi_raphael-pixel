@@ -173,10 +173,10 @@ jobs:
           if [ -f "$BINDER_TRACE_H" ]; then
             # 在文件开头（#include 之前）添加 extern 声明
             sed -i '1i\
-/* Patch: add missing extern declarations for binder command/return strings */\
-extern const char *binder_command_strings[];\
-extern const char *binder_return_strings[];\
-' $BINDER_TRACE_H
+          /* Patch: add missing extern declarations for binder command/return strings */\
+          extern const char *binder_command_strings[];\
+          extern const char *binder_return_strings[];\
+          ' $BINDER_TRACE_H
             echo "Patched $BINDER_TRACE_H"
           else
             echo "Warning: $BINDER_TRACE_H not found, skipping patch"

@@ -31,7 +31,11 @@ jobs:
           echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           echo "ccflags-y += -I\$(srctree)/drivers/kernelsu" >> drivers/kernelsu/Kbuild
+          # 在 kpm 目录中创建必要的符号链接，解决头文件包含问题
+          mkdir -p drivers/kernelsu/kpm
+          ln -sf ../policy drivers/kernelsu/kpm/policy
           ln -sf ../uapi drivers/kernelsu/kpm/uapi
+          ln -sf ../include drivers/kernelsu/kpm/include
 
       - name: Add rtl8188eus WiFi driver
         run: |
@@ -167,7 +171,7 @@ jobs:
           if ! grep -q "typedef void (\*syscall_fn_t)" drivers/kernelsu/hook/syscall_hook.h; then
             sed -i '1i typedef void (*syscall_fn_t)(void);' drivers/kernelsu/hook/syscall_hook.h
           fi
-          # 修复 access_ok 参数个数问题：将 access_ok(addr, size) 替换为 access_ok(VERIFY_READ, addr, size)
+          # 修复 access_ok 参数个数问题
           sed -i 's/access_ok(/access_ok(VERIFY_READ, /g' drivers/kernelsu/kpm/kpm.c
 
       - name: Build the kernel
@@ -285,7 +289,7 @@ jobs:
           if [ -d /vendor/lib/modules ]; then
             MODULE_DEST=/vendor/lib/modules
           elif [ -d /system/lib/modules ]; then
-                      MODULE_DEST=/system/lib/modules
+            MODULE_DEST=/system/lib/modules
           else
             MODULE_DEST=/system/lib/modules
           fi

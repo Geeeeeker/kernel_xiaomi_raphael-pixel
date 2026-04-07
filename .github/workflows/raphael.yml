@@ -171,54 +171,69 @@ jobs:
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
           make -j$(nproc) ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out M=drivers/rtl8188eus modules
-          # 修正：实际生成的模块名为 8188eu.ko
           cp out/drivers/rtl8188eus/8188eu.ko modules-package/
 
-      - name: 编译 USB/IP 用户态工具
+      - name: 编译 USB/IP 用户态工具 (修复段错误)
         run: |
           mkdir -p usbip-out/{bin,libs}
-          docker run --rm --platform linux/arm64 --memory=4g -v ${{ github.workspace }}:/workspace -v ${{ github.workspace }}/usbip-out:/output -w /workspace arm64v8/ubuntu:22.04 bash -c "
-            set -e
-            export DEBIAN_FRONTEND=noninteractive
-            ulimit -s unlimited
-            apt update
-            apt install -y build-essential autoconf libtool pkg-config libudev-dev libssl-dev flex bison file patchelf
-            cd tools/usb/usbip
-            ./autogen.sh
-            ./configure CFLAGS='-O0 -Wno-error' --prefix=/usr
-            make CFLAGS='-O0 -Wno-error' -j1
-            cp src/.libs/usbip /output/bin/
-            cp src/.libs/usbipd /output/bin/
-            cp libsrc/.libs/libusbip.so.0* /output/libs/
-            cd /output
-            BINARIES='bin/usbip bin/usbipd libs/libusbip.so.0*'
-            DEPS=''
-            for file in \$BINARIES; do
-              if [ -f \"\$file\" ]; then
-                needed=\$(readelf -d \"\$file\" | grep NEEDED | awk '{print \$5}' | tr -d '[]' || true)
-                for lib in \$needed; do
-                  if [[ \"\$DEPS\" != *\"\$lib\"* ]]; then
-                    DEPS=\"\$DEPS \$lib\"
-                  fi
-                done
+          docker run --rm \
+            --platform linux/arm64 \
+            --memory=8g \
+            --memory-swap=8g \
+            -v ${{ github.workspace }}:/workspace \
+            -v ${{ github.workspace }}/usbip-out:/output \
+            -w /workspace \
+            arm64v8/ubuntu:22.04 \
+            bash -c "
+              set -e
+              export DEBIAN_FRONTEND=noninteractive
+              ulimit -s unlimited
+              export MAKEFLAGS='-j1'
+              apt update
+              apt install -y build-essential autoconf libtool pkg-config libudev-dev libssl-dev flex bison file patchelf gcc-10 g++-10
+              # 切换默认编译器到 GCC 10
+              update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100
+              update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100
+              export CC=gcc
+              export CXX=g++
+              export CFLAGS='-O0 -g0'
+              export CXXFLAGS='-O0 -g0'
+              cd tools/usb/usbip
+              ./autogen.sh
+              ./configure CFLAGS='-O0 -g0' --prefix=/usr
+              make CFLAGS='-O0 -g0' -j1
+              cp src/.libs/usbip /output/bin/
+              cp src/.libs/usbipd /output/bin/
+              cp libsrc/.libs/libusbip.so.0* /output/libs/
+              cd /output
+              BINARIES='bin/usbip bin/usbipd libs/libusbip.so.0*'
+              DEPS=''
+              for file in \$BINARIES; do
+                if [ -f \"\$file\" ]; then
+                  needed=\$(readelf -d \"\$file\" | grep NEEDED | awk '{print \$5}' | tr -d '[]' || true)
+                  for lib in \$needed; do
+                    if [[ \"\$DEPS\" != *\"\$lib\"* ]]; then
+                      DEPS=\"\$DEPS \$lib\"
+                    fi
+                  done
+                fi
+              done
+              for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
+                libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1 || true)
+                if [ -n \"\$libpath\" ]; then
+                  cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
+                  for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
+                    cp -n \"\$reallib\" libs/ 2>/dev/null || true
+                  done
+                else
+                  echo \"Warning: library \$lib not found\"
+                fi
+              done
+              ld_linux='/lib/ld-linux-aarch64.so.1'
+              if [ -f \"\$ld_linux\" ]; then
+                cp -P \"\$ld_linux\" libs/
               fi
-            done
-            for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
-              libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1 || true)
-              if [ -n \"\$libpath\" ]; then
-                cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
-                for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
-                  cp -n \"\$reallib\" libs/ 2>/dev/null || true
-                done
-              else
-                echo \"Warning: library \$lib not found\"
-              fi
-            done
-            ld_linux='/lib/ld-linux-aarch64.so.1'
-            if [ -f \"\$ld_linux\" ]; then
-              cp -P \"\$ld_linux\" libs/
-            fi
-          "
+            "
 
       - name: 打包 USB/IP 用户态工具
         run: |

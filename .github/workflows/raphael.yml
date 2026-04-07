@@ -1,4 +1,4 @@
-name: Continues testing
+name: Build Kernel with KernelSU v0.9.5 (Minimal)
 
 on:
   workflow_dispatch:
@@ -22,24 +22,91 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Integrate SukiSU-Ultra & Fix Errors
+      - name: Integrate KernelSU v0.9.5 (Official)
         run: |
-          export GIT_ASKPASS=echo
-          git clone --depth=1 https://github.com/Geeeeeker/SukiSU-Ultra.git
-          
-          # 集成驱动代码
-          cp -r SukiSU-Ultra/kernel drivers/kernelsu
-          cp -r SukiSU-Ultra/uapi drivers/kernelsu/
-          
-          # 修改配置文件
-          echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
-          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-          
-          # 创建必要的符号链接
-          mkdir -p drivers/kernelsu/kpm
-          for dir in policy uapi include manager sulog supercall; do
-            [ -d "drivers/kernelsu/$dir" ] && ln -sf "../$dir" "drivers/kernelsu/kpm/$dir"
-          done
+          # 下载官方 KernelSU v0.9.5
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/v0.9.5/kernel/setup.sh" | bash -s v0.9.5
+          # 移除有问题的目录（直接删除，避免编译）
+          rm -rf drivers/kernelsu/manager
+          rm -rf drivers/kernelsu/policy
+          rm -rf drivers/kernelsu/selinux
+          rm -rf drivers/kernelsu/runtime
+          # 修改 Kbuild 只保留核心文件
+          cat > drivers/kernelsu/Kbuild << 'EOF'
+ccflags-y += -I$(srctree)/drivers/kernelsu
+
+obj-$(CONFIG_KSU) += kernelsu.o
+
+kernelsu-objs := core/init.o
+kernelsu-objs += feature/kernel_umount.o
+kernelsu-objs += feature/sulog.o
+kernelsu-objs += feature/sucompat.o
+kernelsu-objs += feature/adb_root.o
+
+kernelsu-objs += hook/lsm_hook.o
+kernelsu-objs += hook/setuid_hook.o
+kernelsu-objs += hook/syscall_event_bridge.o
+kernelsu-objs += hook/syscall_hook_manager.o
+kernelsu-objs += hook/tp_marker.o
+ifeq ($(CONFIG_ARM64),y)
+kernelsu-objs += hook/arm64/patch_memory.o
+kernelsu-objs += hook/arm64/syscall_hook.o
+else ifeq ($(CONFIG_X86_64),y)
+kernelsu-objs += hook/x86_64/patch_memory.o
+kernelsu-objs += hook/x86_64/syscall_hook.o
+endif
+
+kernelsu-objs += infra/event_queue.o
+kernelsu-objs += infra/symbol_resolver.o
+
+kernelsu-objs += sulog/event.o
+kernelsu-objs += sulog/fd.o
+
+kernelsu-objs += supercall/dispatch.o
+kernelsu-objs += supercall/perm.o
+kernelsu-objs += supercall/supercall.o
+
+ifdef KBUILD_EXTMOD
+ifeq ($(CONFIG_KSU_DEBUG),y)
+ccflags-y += -DCONFIG_KSU_DEBUG=1
+endif
+endif
+
+ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include
+ccflags-y += -I$(objtree)/security/selinux -include $(srctree)/include/uapi/asm-generic/errno.h
+
+ifeq ($(filter /%,$(src)),)
+KSU_KERNEL_DIR := $(srctree)/$(src)
+else
+KSU_KERNEL_DIR := $(src)
+endif
+
+ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include
+
+MDIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
+# Version calculation (simplified)
+KSU_VERSION := 30000
+$(info -- KernelSU version: $(KSU_VERSION))
+ccflags-y += -DKSU_VERSION=$(KSU_VERSION)
+
+KSU_NEW_DCACHE_FLUSH := $(shell grep -q __flush_dcache_area $(srctree)/arch/arm64/include/asm/cacheflush.h ; echo $$?)
+$(info -- KSU_NEW_DCACHE_FLUSH: $(KSU_NEW_DCACHE_FLUSH))
+
+ifndef KSU_EXPECTED_SIZE
+KSU_EXPECTED_SIZE := 0x033b
+endif
+ifndef KSU_EXPECTED_HASH
+KSU_EXPECTED_HASH := c371061b19d8c7d7d6133c6a9bafe198fa944e50c1b31c9d8daa8d7f1fc2d2d6
+endif
+
+ccflags-y += -DEXPECTED_SIZE=$(KSU_EXPECTED_SIZE)
+ccflags-y += -DEXPECTED_HASH=\"$(KSU_EXPECTED_HASH)\"
+ccflags-y += -DKSU_NEW_DCACHE_FLUSH=$(KSU_NEW_DCACHE_FLUSH)
+
+ccflags-y += -Wno-strict-prototypes -Wno-int-conversion -Wno-gcc-compat -Wno-missing-prototypes
+ccflags-y += -Wno-declaration-after-statement -Wno-unused-function
+EOF
 
       - name: Add rtl8188eus WiFi driver
         run: |
@@ -103,7 +170,6 @@ jobs:
       - name: 配置内核基础参数
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
-          # 基本配置（完整版，包含所有必要选项）
           echo "CONFIG_MODULES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -139,9 +205,8 @@ jobs:
           echo "CONFIG_ZRAM=y" >> $DEFCONFIG
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
-          # SukiSU
+          # KernelSU
           echo "CONFIG_KSU=y" >> $DEFCONFIG
-          echo "CONFIG_KPM=y" >> $DEFCONFIG
           echo "CONFIG_DEBUG_KERNEL=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
@@ -165,26 +230,15 @@ jobs:
           echo "# CONFIG_TRACING is not set" >> $DEFCONFIG
           echo "# CONFIG_FTRACE is not set" >> $DEFCONFIG
 
-      - name: Comprehensive Patch for 4.14 Kernel
+      - name: Patch KernelSU for 4.14 Kernel
         run: |
-          # 1. 移除 MODULE_IMPORT_NS
+          # 移除 MODULE_IMPORT_NS
           find drivers/kernelsu -name "*.c" -exec sed -i '/MODULE_IMPORT_NS/d' {} \;
-          
-          # 2. 修正 syscall_fn_t 类型
-          SYSCALL_HOOK_H="drivers/kernelsu/hook/syscall_hook.h"
-          if grep -q "typedef void (\*syscall_fn_t)(void);" "$SYSCALL_HOOK_H"; then
-            sed -i 's/typedef void (\*syscall_fn_t)(void);/typedef long (*syscall_fn_t)(struct pt_regs *);/' "$SYSCALL_HOOK_H"
-          elif ! grep -q "typedef long (\*syscall_fn_t)(struct pt_regs \*);" "$SYSCALL_HOOK_H"; then
-            sed -i '1i typedef long (*syscall_fn_t)(struct pt_regs *);' "$SYSCALL_HOOK_H"
-          fi
-          
-          # 3. 修复 access_ok
+          # 修复 access_ok
           find drivers/kernelsu -name "*.c" -exec sed -i 's/access_ok(/access_ok(VERIFY_READ, /g' {} \;
-          
-          # 4. 修复 pgtable.h
+          # 修复 pgtable.h
           find drivers/kernelsu -name "*.c" -exec sed -i 's/#include <linux\/pgtable.h>/#include <asm\/pgtable.h>/g' {} \;
-          
-          # 5. 添加头文件
+          # 添加缺失的头文件
           find drivers/kernelsu -name "*.c" -exec grep -l "pgtable" {} \; | while read file; do
             if ! grep -q "#include <linux/mm.h>" "$file"; then
               sed -i '1i #include <linux/mm.h>' "$file"
@@ -195,18 +249,14 @@ jobs:
               sed -i '1i #include <linux/uaccess.h>' "$file"
             fi
           done
-          
-          # 6. 修复 sucompat.c const
+          # 修复 sucompat.c const
           sed -i 's/ksu_syscall_table\[orig_nr\](regs)/ksu_syscall_table[orig_nr]((struct pt_regs *)regs)/g' drivers/kernelsu/feature/sucompat.c
-          
-          # 7. 修复 syscall_event_bridge.c
+          # 修复 syscall_event_bridge.c
           find drivers/kernelsu/hook -name "*.c" -exec sed -i 's/ksu_syscall_table\[orig_nr\](regs)/ksu_syscall_table[orig_nr]((struct pt_regs *)regs)/g' {} \;
-          
-          # 8. 注释 __NR_clone3
+          # 注释 __NR_clone3
           sed -i 's#ksu_register_syscall_hook(__NR_clone3, ksu_hook_clone);#// ksu_register_syscall_hook(__NR_clone3, ksu_hook_clone);#g' drivers/kernelsu/hook/syscall_hook_manager.c
           sed -i 's#ksu_unregister_syscall_hook(__NR_clone3);#// ksu_unregister_syscall_hook(__NR_clone3);#g' drivers/kernelsu/hook/syscall_hook_manager.c
-          
-          # 9. 修复 patch_memory.c
+          # 修复 patch_memory.c
           PATCH_MEM="drivers/kernelsu/hook/arm64/patch_memory.c"
           if [ -f "$PATCH_MEM" ]; then
             sed -i 's/__pte_to_phys(\*pte)/(pte_pfn(*pte) << PAGE_SHIFT)/g' "$PATCH_MEM"
@@ -217,29 +267,7 @@ jobs:
             sed -i 's/__flush_icache_range/flush_icache_range/g' "$PATCH_MEM"
             sed -i 's/#define ksu_flush_icache(start, end) __flush_icache_range/#define ksu_flush_icache(start, end) flush_icache_range/g' "$PATCH_MEM"
           fi
-          
-          # 10. 清空不兼容的源文件（包括 runtime 文件）
-          for file in \
-            "infra/file_wrapper.c" \
-            "infra/seccomp_cache.c" \
-            "infra/su_mount_ns.c" \
-            "manager/pkg_observer.c" \
-            "manager/throne_tracker.c" \
-            "manager/apk_sign.c" \
-            "policy/app_profile.c" \
-            "policy/allowlist.c" \
-            "policy/feature.c" \
-            "runtime/ksud_integration.c" \
-            "runtime/boot_event.c"
-          do
-            if [ -f "drivers/kernelsu/$file" ]; then
-              : > "drivers/kernelsu/$file"
-            fi
-          done
-          
-          # 11. 重新生成格式正确的 Kbuild 文件（移除 runtime 文件和不兼容的 obj）
-          
-          # 12. 修复 event_queue 中的 __poll_t
+          # 修复 event_queue __poll_t
           for file in drivers/kernelsu/infra/event_queue.h drivers/kernelsu/infra/event_queue.c; do
             if [ -f "$file" ]; then
               sed -i 's/__poll_t/unsigned int/g' "$file"
@@ -332,65 +360,60 @@ jobs:
           name: usbip-arm64-bundle
           path: usbip-arm64-bundle.tar.gz
 
-      - name: Download SukiSU-Ultra Manager APK
+      - name: Download KernelSU Manager APK
         run: |
-          LATEST_RELEASE_URL=$(curl -s https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest | grep "browser_download_url.*\.apk" | cut -d '"' -f 4)
-          if [ -n "$LATEST_RELEASE_URL" ]; then
-            wget -O SukiSU-Ultra-Manager.apk "$LATEST_RELEASE_URL"
-          else
-            wget -O SukiSU-Ultra-Manager.apk https://github.com/tiann/KernelSU/releases/latest/download/KernelSU.apk
-          fi
+          wget -O KernelSU-Manager.apk https://github.com/tiann/KernelSU/releases/download/v0.9.5/KernelSU_v0.9.5_11375-release.apk
           mkdir -p apk-output
-          cp SukiSU-Ultra-Manager.apk apk-output/
+          cp KernelSU-Manager.apk apk-output/
 
       - name: Repack Kernel Artifacts with modules
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
           cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
-          cp apk-output/SukiSU-Ultra-Manager.apk $HOME/AnyKernel3/
+          cp apk-output/KernelSU-Manager.apk $HOME/AnyKernel3/
           mkdir -p $HOME/AnyKernel3/modules
           cp modules-package/*.ko $HOME/AnyKernel3/modules/
           cat > $HOME/AnyKernel3/anykernel.sh << 'EOF'
-          #!/sbin/sh
-          kernel.string=SukiSU-Ultra Kernel with extra modules
-          do.devicecheck=1
-          do.modules=1
-          do.systemless=1
-          do.cleanup=1
-          device.name1=raphael
-          
-          MODULE_DEST=""
-          if [ -d /vendor/lib/modules ]; then
-            MODULE_DEST=/vendor/lib/modules
-          elif [ -d /system/lib/modules ]; then
-            MODULE_DEST=/system/lib/modules
-          else
-            MODULE_DEST=/system/lib/modules
-          fi
-          
-          ui_print " - Flashing kernel"
-          block=/dev/block/by-name/boot
-          is_slot_device=1
-          ramdisk_compression=auto
-          . /tmp/anykernel/tools/ak2-core.sh
-          
-          ui_print " - Installing kernel modules"
-          for mod in modules/*.ko; do
-            modname=$(basename $mod)
-            ui_print "   Installing $modname"
-            cp $mod $MODULE_DEST/$modname
-            chmod 644 $MODULE_DEST/$modname
-            chcon u:object_r:system_file:s0 $MODULE_DEST/$modname 2>/dev/null
-          done
-          
-          if [ -x /system/bin/depmod ]; then
-            /system/bin/depmod -a
-          elif [ -x /sbin/depmod ]; then
-            /sbin/depmod -a
-          fi
-          ui_print " - Done"
-          EOF
+#!/sbin/sh
+kernel.string=KernelSU v0.9.5 Kernel with extra modules
+do.devicecheck=1
+do.modules=1
+do.systemless=1
+do.cleanup=1
+device.name1=raphael
+
+MODULE_DEST=""
+if [ -d /vendor/lib/modules ]; then
+  MODULE_DEST=/vendor/lib/modules
+elif [ -d /system/lib/modules ]; then
+  MODULE_DEST=/system/lib/modules
+else
+  MODULE_DEST=/system/lib/modules
+fi
+
+ui_print " - Flashing kernel"
+block=/dev/block/by-name/boot
+is_slot_device=1
+ramdisk_compression=auto
+. /tmp/anykernel/tools/ak2-core.sh
+
+ui_print " - Installing kernel modules"
+for mod in modules/*.ko; do
+  modname=$(basename $mod)
+  ui_print "   Installing $modname"
+  cp $mod $MODULE_DEST/$modname
+  chmod 644 $MODULE_DEST/$modname
+  chcon u:object_r:system_file:s0 $MODULE_DEST/$modname 2>/dev/null
+done
+
+if [ -x /system/bin/depmod ]; then
+  /system/bin/depmod -a
+elif [ -x /sbin/depmod ]; then
+  /sbin/depmod -a
+fi
+ui_print " - Done"
+EOF
           chmod +x $HOME/AnyKernel3/anykernel.sh
           BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')
           COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
@@ -409,8 +432,8 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SukiSU-Ultra-Manager
-          path: apk-output/SukiSU-Ultra-Manager.apk
+          name: KernelSU-Manager
+          path: apk-output/KernelSU-Manager.apk
 
       - name: Create Release and Upload USB/IP Bundle
         if: startsWith(github.ref, 'refs/tags/')
@@ -422,5 +445,5 @@ jobs:
           prerelease: false
           files: |
             usbip-arm64-bundle.tar.gz
-            apk-output/SukiSU-Ultra-Manager.apk
+            apk-output/KernelSU-Manager.apk
             ${{ env.ZIP_NAME }}

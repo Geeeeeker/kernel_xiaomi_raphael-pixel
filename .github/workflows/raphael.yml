@@ -31,14 +31,11 @@ jobs:
           echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           echo "ccflags-y += -I\$(srctree)/drivers/kernelsu" >> drivers/kernelsu/Kbuild
-          # 在 kpm 目录中创建所有必要的符号链接
+          # 创建所有必要的符号链接，解决头文件包含问题
           mkdir -p drivers/kernelsu/kpm
-          ln -sf ../policy drivers/kernelsu/kpm/policy
-          ln -sf ../uapi drivers/kernelsu/kpm/uapi
-          ln -sf ../include drivers/kernelsu/kpm/include
-          ln -sf ../manager drivers/kernelsu/kpm/manager
-          ln -sf ../sulog drivers/kernelsu/kpm/sulog
-          ln -sf ../supercall drivers/kernelsu/kpm/supercall
+          for dir in policy uapi include manager sulog supercall; do
+            ln -sf ../$dir drivers/kernelsu/kpm/$dir
+          done
 
       - name: Add rtl8188eus WiFi driver
         run: |
@@ -102,7 +99,7 @@ jobs:
       - name: 配置内核基础参数
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
-          # 基本配置
+          # 基本配置（完整版，包含所有必要选项）
           echo "CONFIG_MODULES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -166,16 +163,33 @@ jobs:
 
       - name: Patch SukiSU for 4.14 kernel
         run: |
-          # 移除 MODULE_IMPORT_NS
-          if grep -q "MODULE_IMPORT_NS" drivers/kernelsu/core/init.c; then
-            sed -i '/MODULE_IMPORT_NS/d' drivers/kernelsu/core/init.c
-          fi
-          # 添加 syscall_fn_t 类型定义
+          # 1. 移除 MODULE_IMPORT_NS（4.14 不支持）
+          find drivers/kernelsu -name "*.c" -exec sed -i '/MODULE_IMPORT_NS/d' {} \;
+          
+          # 2. 添加 syscall_fn_t 类型定义
           if ! grep -q "typedef void (\*syscall_fn_t)" drivers/kernelsu/hook/syscall_hook.h; then
             sed -i '1i typedef void (*syscall_fn_t)(void);' drivers/kernelsu/hook/syscall_hook.h
           fi
-          # 修复 access_ok 参数个数问题
-          sed -i 's/access_ok(/access_ok(VERIFY_READ, /g' drivers/kernelsu/kpm/kpm.c
+          
+          # 3. 修复 access_ok 参数个数（4.14 需要三个参数）
+          find drivers/kernelsu -name "*.c" -exec sed -i 's/access_ok(/access_ok(VERIFY_READ, /g' {} \;
+          
+          # 4. 修复 linux/pgtable.h -> asm/pgtable.h
+          find drivers/kernelsu -name "*.c" -exec sed -i 's/#include <linux\/pgtable.h>/#include <asm\/pgtable.h>/g' {} \;
+          
+          # 5. 为使用了 pgtable 的文件自动添加 linux/mm.h
+          find drivers/kernelsu -name "*.c" -exec grep -l "pgtable" {} \; | while read file; do
+            if ! grep -q "#include <linux/mm.h>" "$file"; then
+              sed -i '1i #include <linux/mm.h>' "$file"
+            fi
+          done
+          
+          # 6. 为使用了 VERIFY_READ 的文件自动添加 linux/uaccess.h
+          find drivers/kernelsu -name "*.c" -exec grep -l "VERIFY_READ" {} \; | while read file; do
+            if ! grep -q "#include <linux/uaccess.h>" "$file"; then
+              sed -i '1i #include <linux/uaccess.h>' "$file"
+            fi
+          done
 
       - name: Build the kernel
         run: |

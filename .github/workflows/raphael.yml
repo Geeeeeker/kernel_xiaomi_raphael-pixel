@@ -22,19 +22,28 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Integrate SukiSU-Ultra
+      - name: Integrate SukiSU-Ultra & Fix Errors
         run: |
           export GIT_ASKPASS=echo
           git clone --depth=1 https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
+          
+          # 集成驱动代码
           cp -r SukiSU-Ultra/kernel drivers/kernelsu
           cp -r SukiSU-Ultra/uapi drivers/kernelsu/
+          
+          # 修复 sucompat.c 中的 "too many arguments" 编译错误
+          # 将 ksu_syscall_table[orig_nr](regs) 替换为 ksu_syscall_table[orig_nr]()
+          sed -i 's/ksu_syscall_table\[orig_nr\](regs)/ksu_syscall_table[orig_nr]()/g' drivers/kernelsu/feature/sucompat.c
+          
+          # 修改配置文件
           echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           echo "ccflags-y += -I\$(srctree)/drivers/kernelsu" >> drivers/kernelsu/Kbuild
-          # 创建所有必要的符号链接，解决头文件包含问题
+          
+          # 创建必要的符号链接
           mkdir -p drivers/kernelsu/kpm
           for dir in policy uapi include manager sulog supercall; do
-            ln -sf ../$dir drivers/kernelsu/kpm/$dir
+            [ -d "drivers/kernelsu/$dir" ] && ln -sf "../$dir" "drivers/kernelsu/kpm/$dir"
           done
 
       - name: Add rtl8188eus WiFi driver

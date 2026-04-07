@@ -293,6 +293,19 @@ jobs:
             fi
           fi
           
+          # 16. 修复 supercall.c 中的 ksys_close 和 TWA_RESUME
+          SUPERCALL_C="drivers/kernelsu/supercall/supercall.c"
+          if [ -f "$SUPERCALL_C" ]; then
+            # 添加 ksys_close 兼容宏
+            if ! grep -q "#define ksys_close sys_close" "$SUPERCALL_C"; then
+              sed -i '1i #define ksys_close sys_close' "$SUPERCALL_C"
+            fi
+            # 添加 TWA_RESUME 定义（如果未定义）
+            if ! grep -q "#define TWA_RESUME" "$SUPERCALL_C"; then
+              sed -i '2i #ifndef TWA_RESUME\n#define TWA_RESUME 0\n#endif' "$SUPERCALL_C"
+            fi
+          fi
+          
       - name: Build the kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin

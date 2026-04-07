@@ -31,11 +31,14 @@ jobs:
           echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           echo "ccflags-y += -I\$(srctree)/drivers/kernelsu" >> drivers/kernelsu/Kbuild
-          # 在 kpm 目录中创建必要的符号链接，解决头文件包含问题
+          # 在 kpm 目录中创建所有必要的符号链接
           mkdir -p drivers/kernelsu/kpm
           ln -sf ../policy drivers/kernelsu/kpm/policy
           ln -sf ../uapi drivers/kernelsu/kpm/uapi
           ln -sf ../include drivers/kernelsu/kpm/include
+          ln -sf ../manager drivers/kernelsu/kpm/manager
+          ln -sf ../sulog drivers/kernelsu/kpm/sulog
+          ln -sf ../supercall drivers/kernelsu/kpm/supercall
 
       - name: Add rtl8188eus WiFi driver
         run: |

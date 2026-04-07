@@ -1,9 +1,11 @@
 name: Continues testing
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 手动触发
   push:
     branches: [ "**" ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ "**" ]
 
@@ -197,6 +199,12 @@ jobs:
               sed -i '1i #include <linux/uaccess.h>' "$file"
             fi
           done
+          
+          # 7. 修复 sucompat.c 中返回值不匹配的问题
+          # 将 ret = ksu_syscall_table[orig_nr](); 替换为 ksu_syscall_table[orig_nr](); ret = 0;
+          sed -i 's/ret = ksu_syscall_table\[orig_nr\]();/ksu_syscall_table[orig_nr](); ret = 0;/g' drivers/kernelsu/feature/sucompat.c
+          # 将 return ksu_syscall_table[orig_nr](); 替换为 ksu_syscall_table[orig_nr](); return 0;
+          sed -i 's/return ksu_syscall_table\[orig_nr\]();/ksu_syscall_table[orig_nr](); return 0;/g' drivers/kernelsu/feature/sucompat.c
 
       - name: Build the kernel
         run: |

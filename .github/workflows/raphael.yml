@@ -171,11 +171,12 @@ jobs:
           # 1. 移除 MODULE_IMPORT_NS
           find drivers/kernelsu -name "*.c" -exec sed -i '/MODULE_IMPORT_NS/d' {} \;
           
-          # 2. 修正 syscall_fn_t 类型
-          if grep -q "typedef void (\*syscall_fn_t)(void);" drivers/kernelsu/hook/syscall_hook.h; then
-            sed -i 's/typedef void (\*syscall_fn_t)(void);/typedef long (*syscall_fn_t)(struct pt_regs *);/' drivers/kernelsu/hook/syscall_hook.h
-          elif ! grep -q "typedef long (\*syscall_fn_t)(struct pt_regs \*);" drivers/kernelsu/hook/syscall_hook.h; then
-            sed -i '1i typedef long (*syscall_fn_t)(struct pt_regs *);' drivers/kernelsu/hook/syscall_hook.h
+          # 2. 修正 syscall_fn_t 类型定义
+          SYSCALL_HOOK_H="drivers/kernelsu/hook/syscall_hook.h"
+          if grep -q "typedef void (\*syscall_fn_t)(void);" "$SYSCALL_HOOK_H"; then
+            sed -i 's/typedef void (\*syscall_fn_t)(void);/typedef long (*syscall_fn_t)(struct pt_regs *);/' "$SYSCALL_HOOK_H"
+          elif ! grep -q "typedef long (\*syscall_fn_t)(struct pt_regs \*);" "$SYSCALL_HOOK_H"; then
+            sed -i '1i typedef long (*syscall_fn_t)(struct pt_regs *);' "$SYSCALL_HOOK_H"
           fi
           
           # 3. 修复 access_ok
@@ -184,29 +185,31 @@ jobs:
           # 4. 修复 pgtable.h
           find drivers/kernelsu -name "*.c" -exec sed -i 's/#include <linux\/pgtable.h>/#include <asm\/pgtable.h>/g' {} \;
           
-          # 5. 添加头文件
+          # 5. 添加 linux/mm.h
           find drivers/kernelsu -name "*.c" -exec grep -l "pgtable" {} \; | while read file; do
             if ! grep -q "#include <linux/mm.h>" "$file"; then
               sed -i '1i #include <linux/mm.h>' "$file"
             fi
           done
+          
+          # 6. 添加 linux/uaccess.h
           find drivers/kernelsu -name "*.c" -exec grep -l -E "VERIFY_READ|strncpy_from_user" {} \; | while read file; do
             if ! grep -q "#include <linux/uaccess.h>" "$file"; then
               sed -i '1i #include <linux/uaccess.h>' "$file"
             fi
           done
           
-          # 6. 修复 sucompat.c const
+          # 7. 修复 sucompat.c const
           sed -i 's/ksu_syscall_table\[orig_nr\](regs)/ksu_syscall_table[orig_nr]((struct pt_regs *)regs)/g' drivers/kernelsu/feature/sucompat.c
           
-          # 7. 修复 syscall_event_bridge.c
+          # 8. 修复 syscall_event_bridge.c
           find drivers/kernelsu/hook -name "*.c" -exec sed -i 's/ksu_syscall_table\[orig_nr\](regs)/ksu_syscall_table[orig_nr]((struct pt_regs *)regs)/g' {} \;
           
-          # 8. 注释 __NR_clone3
-          sed -i 's/ksu_register_syscall_hook(__NR_clone3, ksu_hook_clone);/\/\/ ksu_register_syscall_hook(__NR_clone3, ksu_hook_clone);/g' drivers/kernelsu/hook/syscall_hook_manager.c
-          sed -i 's/ksu_unregister_syscall_hook(__NR_clone3);/\/\/ ksu_unregister_syscall_hook(__NR_clone3);/g' drivers/kernelsu/hook/syscall_hook_manager.c
+          # 9. 注释 __NR_clone3
+          sed -i 's#ksu_register_syscall_hook(__NR_clone3, ksu_hook_clone);#// ksu_register_syscall_hook(__NR_clone3, ksu_hook_clone);#g' drivers/kernelsu/hook/syscall_hook_manager.c
+          sed -i 's#ksu_unregister_syscall_hook(__NR_clone3);#// ksu_unregister_syscall_hook(__NR_clone3);#g' drivers/kernelsu/hook/syscall_hook_manager.c
           
-          # 9. 修复 patch_memory.c
+          # 10. 修复 patch_memory.c
           PATCH_MEM="drivers/kernelsu/hook/arm64/patch_memory.c"
           if [ -f "$PATCH_MEM" ]; then
             sed -i 's/__pte_to_phys(\*pte)/(pte_pfn(*pte) << PAGE_SHIFT)/g' "$PATCH_MEM"
@@ -218,16 +221,16 @@ jobs:
             sed -i 's/#define ksu_flush_icache(start, end) __flush_icache_range/#define ksu_flush_icache(start, end) flush_icache_range/g' "$PATCH_MEM"
           fi
           
-          # 10. 禁用不兼容的 infra 文件（使用更安全的方式，直接删除行和清空文件）
-          # 从 Kbuild 中移除相关目标文件
-          for obj in "infra/file_wrapper.o" "infra/seccomp_cache.o"; do
-            sed -i "/$obj/d" drivers/kernelsu/Kbuild || true
+          # 11. 禁用不兼容的 infra 文件（包括 file_wrapper, seccomp_cache, su_mount_ns）
+          for obj in "infra/file_wrapper.o" "infra/seccomp_cache.o" "infra/su_mount_ns.o"; do
+            sed -i "/$obj/d" drivers/kernelsu/Kbuild 2>/dev/null || true
           done
           # 清空源文件
-          > drivers/kernelsu/infra/file_wrapper.c || true
-          > drivers/kernelsu/infra/seccomp_cache.c || true
+          for src in "infra/file_wrapper.c" "infra/seccomp_cache.c" "infra/su_mount_ns.c"; do
+            : > drivers/kernelsu/$src
+          done
           
-          # 11. 修复 event_queue.c 中的 __poll_t
+          # 12. 修复 event_queue 中的 __poll_t
           for file in drivers/kernelsu/infra/event_queue.h drivers/kernelsu/infra/event_queue.c; do
             if [ -f "$file" ]; then
               sed -i 's/__poll_t/unsigned int/g' "$file"

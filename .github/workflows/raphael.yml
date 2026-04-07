@@ -22,10 +22,16 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 2. 集成 KernelSU v0.9.5 (官方)
-      - name: Integrate KernelSU v0.9.5 (Official)
+      # 2. 手动集成 KernelSU v0.9.5（不运行 setup.sh，避免修改 binder）
+      - name: Integrate KernelSU v0.9.5 (Manual, without binder patches)
         run: |
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/v0.9.5/kernel/setup.sh" | bash -s v0.9.5
+          export GIT_ASKPASS=echo
+          git clone --depth=1 --branch v0.9.5 https://github.com/tiann/KernelSU.git
+          mkdir -p drivers/kernelsu
+          cp -r KernelSU/kernel/* drivers/kernelsu/
+          echo "obj-y += kernelsu/" >> drivers/Makefile
+          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+          rm -rf KernelSU
 
       # 3. 添加 rtl8188eus 无线网卡驱动（明确指定 master 分支）
       - name: Add rtl8188eus WiFi driver
@@ -134,7 +140,7 @@ jobs:
           echo "CONFIG_ZRAM=y" >> $DEFCONFIG
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
-          # KernelSU (官方 v0.9.5)
+          # KernelSU v0.9.5 配置
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_DEBUG_KERNEL=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
@@ -266,28 +272,12 @@ jobs:
           name: usbip-arm64-bundle
           path: usbip-arm64-bundle.tar.gz
 
-      # 16. 下载 KernelSU v0.9.5 管理器 APK（用于随内核发布）
-      - name: Download KernelSU Manager APK v0.9.5
-        run: |
-          # 从官方 v0.9.5 release 下载 APK
-          APK_URL=$(curl -s https://api.github.com/repos/tiann/KernelSU/releases/tags/v0.9.5 | grep "browser_download_url.*\.apk" | cut -d '"' -f 4)
-          if [ -n "$APK_URL" ]; then
-            wget -O KernelSU-Manager.apk "$APK_URL"
-          else
-            echo "Failed to fetch KernelSU v0.9.5 APK, falling back to latest release"
-            wget -O KernelSU-Manager.apk https://github.com/tiann/KernelSU/releases/latest/download/KernelSU.apk
-          fi
-          mkdir -p $GITHUB_WORKSPACE/apk-output
-          cp KernelSU-Manager.apk $GITHUB_WORKSPACE/apk-output/
-        shell: bash
-
-      # 17. 打包 AnyKernel3 内核安装包（并将 APK 一同打包）
+      # 16. 打包 AnyKernel3 内核安装包（不包含 APK）
       - name: Repack Kernel Artifacts
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
           cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
-          cp apk-output/KernelSU-Manager.apk $HOME/AnyKernel3/
           BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')
           COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
           ZIP_NAME="${BRANCH}-${COMMIT_HASH}.zip"
@@ -297,21 +287,14 @@ jobs:
           ls -lah $GITHUB_WORKSPACE/AnyKernel3
         shell: bash
 
-      # 18. 上传内核安装包作为构建工件
+      # 17. 上传内核安装包作为构建工件
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ github.workspace }}/AnyKernel3/
 
-      # 19. 上传 APK 单独作为构建工件（可选）
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: KernelSU-Manager
-          path: apk-output/KernelSU-Manager.apk
-
-      # 20. 发布到 GitHub Release（仅在推送 tag 时执行）
+      # 18. 发布到 GitHub Release（仅在推送 tag 时执行，仅上传 USB/IP 捆绑包）
       - name: Create Release and Upload USB/IP Bundle
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
@@ -322,4 +305,3 @@ jobs:
           prerelease: false
           files: |
             usbip-arm64-bundle.tar.gz
-            apk-output/KernelSU-Manager.apk

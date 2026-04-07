@@ -368,34 +368,16 @@ jobs:
             sed -i 's/__ksu_is_allow_uid_for_current/\/\/ __ksu_is_allow_uid_for_current/g' "$KSUD_INT"
           fi
           
-          # 23. 从源仓库复制缺失的头文件 klog.h 和 ksu.h
+          # 23. 从源仓库复制缺失的头文件 klog.h 和 ksu.h（使用 printf 避免 heredoc 问题）
           if [ -d "SukiSU-Ultra" ]; then
             cp SukiSU-Ultra/kernel/include/klog.h drivers/kernelsu/klog.h 2>/dev/null || true
             cp SukiSU-Ultra/uapi/ksu.h drivers/kernelsu/ksu.h 2>/dev/null || true
           fi
-          # 如果复制失败，创建备用版本
           if [ ! -f "drivers/kernelsu/klog.h" ]; then
-            cat > drivers/kernelsu/klog.h << 'EOF'
-            #ifndef _KSU_KLOG_H_
-            #define _KSU_KLOG_H_
-            #include <linux/printk.h>
-            #define ksu_log_info(fmt, ...) pr_info("KSU: " fmt, ##__VA_ARGS__)
-            #define ksu_log_err(fmt, ...) pr_err("KSU: " fmt, ##__VA_ARGS__)
-            #define ksu_log_warn(fmt, ...) pr_warn("KSU: " fmt, ##__VA_ARGS__)
-            #define ksu_log_debug(fmt, ...) pr_debug("KSU: " fmt, ##__VA_ARGS__)
-            #endif
-            EOF
+            printf '%s\n' '#ifndef _KSU_KLOG_H_' '#define _KSU_KLOG_H_' '#include <linux/printk.h>' '#define ksu_log_info(fmt, ...) pr_info("KSU: " fmt, ##__VA_ARGS__)' '#define ksu_log_err(fmt, ...) pr_err("KSU: " fmt, ##__VA_ARGS__)' '#define ksu_log_warn(fmt, ...) pr_warn("KSU: " fmt, ##__VA_ARGS__)' '#define ksu_log_debug(fmt, ...) pr_debug("KSU: " fmt, ##__VA_ARGS__)' '#endif' > drivers/kernelsu/klog.h
           fi
           if [ ! -f "drivers/kernelsu/ksu.h" ]; then
-            echo "Warning: ksu.h not found, creating minimal" >&2
-            cat > drivers/kernelsu/ksu.h << 'EOF'
-            #ifndef _KSU_UAPI_KSU_H_
-            #define _KSU_UAPI_KSU_H_
-            #include <linux/types.h>
-            #include <linux/ioctl.h>
-            #define KERNEL_SU_OPTION 0
-            #endif
-            EOF
+            printf '%s\n' '#ifndef _KSU_UAPI_KSU_H_' '#define _KSU_UAPI_KSU_H_' '#include <linux/types.h>' '#include <linux/ioctl.h>' '#define KERNEL_SU_OPTION 0' '#endif' > drivers/kernelsu/ksu.h
           fi
           
       - name: Build the kernel

@@ -189,20 +189,27 @@ jobs:
       # 维持原有的编译步骤，但增加 --platform 参数确保调用正确架构
       - name: 编译 USB/IP 用户态工具
         run: |
+          mkdir -p usbip-out/{bin,libs}
           docker run --rm \
             --platform linux/arm64 \
-            -v ${{ github.workspace }}:/workspace \
+            -v ${{ github.workspace }}:/src \
+            -v ${{ github.workspace }}/usbip-out:/output \
+            -w /src \
             arm64v8/ubuntu:22.04 \
             bash -c "
               set -e
-              apt update && apt install -y build-essential autoconf libtool pkg-config libudev-dev libssl-dev flex bison
+              # 调试：查看当前目录下有哪些文件，防止路径找错
+              ls -d tools/usb/usbip || (echo '错误：找不到 tools 目录，请检查源码结构' && ls -F && exit 1)
+              
+              apt update && apt install -y build-essential autoconf libtool pkg-config libudev-dev libssl-dev flex bison clang-14
+              
               cd tools/usb/usbip
               ./autogen.sh
-              # 关键点：禁用所有可能导致溢出的特性
-              export CFLAGS='-O0 -fno-stack-protector -U_FORTIFY_SOURCE'
-              ./configure --prefix=/usr
-              # 强制单线程编译排除并发导致的段错误
+              # 使用 clang 避免之前的段错误，同时禁用优化提高兼容性
+              ./configure CC=clang-14 CFLAGS='-O0 -fno-stack-protector' --prefix=/usr
               make -j1
+              
+              # 拷贝编译产物
               cp src/.libs/usbip /output/bin/
               cp src/.libs/usbipd /output/bin/
               cp libsrc/.libs/libusbip.so.0* /output/libs/

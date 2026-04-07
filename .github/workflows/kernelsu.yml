@@ -232,14 +232,25 @@ jobs:
             "manager/apk_sign.c" \
             "policy/app_profile.c" \
             "policy/allowlist.c" \
-            "policy/feature.c"
+            "policy/feature.c" \
+            "selinux/rules.c" \
+            "selinux/sepolicy.c" \
+            "selinux/selinux.c"
           do
             if [ -f "drivers/kernelsu/$file" ]; then
               : > "drivers/kernelsu/$file"
             fi
           done
           
-          # 11. 修复 ksud_integration.c 中缺失的 copy_*_nofault 以及 const 不匹配
+          # 11. 修改 Kbuild，注释掉 selinux 相关对象（避免链接空文件）
+          KBUILD="drivers/kernelsu/Kbuild"
+          if [ -f "$KBUILD" ]; then
+            sed -i '/selinux\/rules.o/d' "$KBUILD"
+            sed -i '/selinux\/sepolicy.o/d' "$KBUILD"
+            sed -i '/selinux\/selinux.o/d' "$KBUILD"
+          fi
+          
+          # 12. 修复 ksud_integration.c 中缺失的 copy_*_nofault 以及 const 不匹配
           KSUD_INT="drivers/kernelsu/runtime/ksud_integration.c"
           if [ -f "$KSUD_INT" ]; then
             # 添加兼容宏定义（放在文件开头）
@@ -254,7 +265,7 @@ jobs:
             sed -i 's/long (\*orig_sys_fstat)(const struct pt_regs \*)/long (*orig_sys_fstat)(struct pt_regs *)/' "$KSUD_INT"
           fi
           
-          # 12. 修复 event_queue 中的 __poll_t
+          # 13. 修复 event_queue 中的 __poll_t
           for file in drivers/kernelsu/infra/event_queue.h drivers/kernelsu/infra/event_queue.c; do
             if [ -f "$file" ]; then
               sed -i 's/__poll_t/unsigned int/g' "$file"

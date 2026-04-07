@@ -22,17 +22,20 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 2. 集成 SukiSU-Ultra
+      # 2. 集成 SukiSU-Ultra（修正 uapi 路径）
       - name: Integrate SukiSU-Ultra
         run: |
           export GIT_ASKPASS=echo
           git clone --depth=1 https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
+          # 复制内核模块代码
           cp -r SukiSU-Ultra/kernel drivers/kernelsu
-          mkdir -p include/linux/kernelsu
-          cp -r SukiSU-Ultra/uapi/* include/linux/kernelsu/
+          # 复制 uapi 头文件到 kernelsu 目录下，以满足 #include "uapi/xxx.h"
+          cp -r SukiSU-Ultra/uapi drivers/kernelsu/
+          # 修改驱动 Makefile 和 Kconfig
           echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-          sed -i '1i ccflags-y += -I$(srctree)/include/linux/kernelsu' drivers/kernelsu/Kbuild
+          # 清理可能残留的旧头文件路径（可选）
+          rm -rf include/linux/kernelsu 2>/dev/null || true
 
       # 3. 添加 rtl8188eus 驱动
       - name: Add rtl8188eus WiFi driver
@@ -101,7 +104,7 @@ jobs:
           rm -rf out
           mkdir -p out
 
-      # 11. 配置内核基础参数（禁用 tracing 解决 binder 编译错误）
+      # 11. 配置内核基础参数（包含禁用 tracing 以解决 binder 编译错误）
       - name: 配置内核基础参数
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
@@ -169,7 +172,7 @@ jobs:
           echo "# CONFIG_FTRACE is not set" >> $DEFCONFIG
         shell: bash
 
-      # 12. 完整构建内核（不再需要 patch binder_trace.h，因为 tracing 已禁用）
+      # 12. 完整构建内核
       - name: Build the kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
@@ -408,3 +411,7 @@ jobs:
             usbip-arm64-bundle.tar.gz
             apk-output/SukiSU-Ultra-Manager.apk
             ${{ env.ZIP_NAME }}
+
+            apk-output/SukiSU-Ultra-Manager.apk
+            ${{ env.ZIP_NAME }}
+

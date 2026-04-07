@@ -25,7 +25,7 @@ jobs:
       - name: Integrate SukiSU-Ultra & Fix Errors
         run: |
           export GIT_ASKPASS=echo
-          git clone --depth=1 https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
+          git clone --depth=1 https://github.com/Geeeeeker/SukiSU-Ultra.git
           
           # 集成驱动代码
           cp -r SukiSU-Ultra/kernel drivers/kernelsu

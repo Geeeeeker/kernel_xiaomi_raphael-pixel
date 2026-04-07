@@ -274,6 +274,9 @@ jobs:
               fi
             fi
           done
+          
+          # 14. 修复 linux/minmax.h 不存在（4.14 内核没有该头文件）
+          find drivers/kernelsu -name "*.c" -exec sed -i 's/#include <linux\/minmax.h>/#include <linux\/kernel.h>/g' {} \;
 
       - name: Build the kernel
         run: |

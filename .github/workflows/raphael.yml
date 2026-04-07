@@ -180,34 +180,21 @@ jobs:
           make -j$(nproc) ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out M=drivers/rtl8188eus modules
           cp out/drivers/rtl8188eus/8188eu.ko modules-package/
 
-      # 编译 USB/IP 用户态工具（Docker 容器，使用 Clang 避免段错误）
       - name: 编译 USB/IP 用户态工具
         run: |
-          mkdir -p usbip-out/{bin,libs}
           docker run --rm \
-            --platform linux/arm64 \
-            --memory=8g \
-            --memory-swap=8g \
             -v ${{ github.workspace }}:/workspace \
-            -v ${{ github.workspace }}/usbip-out:/output \
             -w /workspace \
             arm64v8/ubuntu:22.04 \
             bash -c "
               set -e
-              export DEBIAN_FRONTEND=noninteractive
-              ulimit -s unlimited
-              export MAKEFLAGS='-j1'
-              apt update
-              apt install -y build-essential autoconf libtool pkg-config libudev-dev libssl-dev flex bison file patchelf clang-14 llvm-14
-              update-alternatives --install /usr/bin/cc cc /usr/bin/clang-14 100
-              update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-14 100
-              export CC=clang-14
-              export CXX=clang++-14
-              export CFLAGS='-O0 -g0 -fno-stack-protector'
-              export CXXFLAGS='-O0 -g0 -fno-stack-protector'
+              apt update && apt install -y build-essential autoconf libtool pkg-config libudev-dev libssl-dev flex bison
               cd tools/usb/usbip
               ./autogen.sh
-              ./configure CC=clang-14 CXX=clang++-14 CFLAGS='-O0 -g0 -fno-stack-protector' --prefix=/usr
+              # 关键点：禁用所有可能导致溢出的特性
+              export CFLAGS='-O0 -fno-stack-protector -U_FORTIFY_SOURCE'
+              ./configure --prefix=/usr
+              # 强制单线程编译排除并发导致的段错误
               make -j1
               cp src/.libs/usbip /output/bin/
               cp src/.libs/usbipd /output/bin/

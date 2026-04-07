@@ -173,7 +173,7 @@ jobs:
           make -j$(nproc) ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out M=drivers/rtl8188eus modules
           cp out/drivers/rtl8188eus/8188eu.ko modules-package/
 
-      - name: 编译 USB/IP 用户态工具 (修复段错误)
+      - name: 编译 USB/IP 用户态工具 (使用 Clang 修复段错误)
         run: |
           mkdir -p usbip-out/{bin,libs}
           docker run --rm \
@@ -190,18 +190,17 @@ jobs:
               ulimit -s unlimited
               export MAKEFLAGS='-j1'
               apt update
-              apt install -y build-essential autoconf libtool pkg-config libudev-dev libssl-dev flex bison file patchelf gcc-10 g++-10
-              # 切换默认编译器到 GCC 10
-              update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100
-              update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100
-              export CC=gcc
-              export CXX=g++
-              export CFLAGS='-O0 -g0'
-              export CXXFLAGS='-O0 -g0'
+              apt install -y build-essential autoconf libtool pkg-config libudev-dev libssl-dev flex bison file patchelf clang-14 llvm-14
+              update-alternatives --install /usr/bin/cc cc /usr/bin/clang-14 100
+              update-alternatives --install /usr/bin/c++ c++ /usr/bin/clang++-14 100
+              export CC=clang-14
+              export CXX=clang++-14
+              export CFLAGS='-O0 -g0 -fno-stack-protector'
+              export CXXFLAGS='-O0 -g0 -fno-stack-protector'
               cd tools/usb/usbip
               ./autogen.sh
-              ./configure CFLAGS='-O0 -g0' --prefix=/usr
-              make CFLAGS='-O0 -g0' -j1
+              ./configure CC=clang-14 CXX=clang++-14 CFLAGS='-O0 -g0 -fno-stack-protector' --prefix=/usr
+              make -j1
               cp src/.libs/usbip /output/bin/
               cp src/.libs/usbipd /output/bin/
               cp libsrc/.libs/libusbip.so.0* /output/libs/

@@ -22,25 +22,30 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Integrate SukiSU-Ultra & Fix Errors
+      - name: Integrate SukiSU-Ultra & Patch compat
         run: |
           export GIT_ASKPASS=echo
-          git clone --depth=1 https://github.com/SukiSU-Ultra/SukiSU-Ultra.git
+          git clone --depth=1 https://github.com
           
           # 集成驱动代码
           cp -r SukiSU-Ultra/kernel drivers/kernelsu
           cp -r SukiSU-Ultra/uapi drivers/kernelsu/
           
-          # 修复 sucompat.c 中的 "too many arguments" 编译错误
-          # 将 ksu_syscall_table[orig_nr](regs) 替换为 ksu_syscall_table[orig_nr]()
-          sed -i 's/ksu_syscall_table\[orig_nr\](regs)/ksu_syscall_table[orig_nr]()/g' drivers/kernelsu/feature/sucompat.c
+          # --- 修复 sucompat.c 编译错误 ---
+          # 1. 处理第 160 行左右的赋值错误：将 ret = func() 拆分为 func() 和 ret = regs->regs[0]
+          sed -i 's/ret = ksu_syscall_table\[orig_nr\](regs);/ksu_syscall_table[orig_nr](); ret = regs->regs[0];/g' drivers/kernelsu/feature/sucompat.c
+          sed -i 's/ret = ksu_syscall_table\[orig_nr\]();/ksu_syscall_table[orig_nr](); ret = regs->regs[0];/g' drivers/kernelsu/feature/sucompat.c
+          
+          # 2. 处理第 171 行左右的直接返回错误：先调用函数，再返回寄存器值
+          sed -i 's/return ksu_syscall_table\[orig_nr\](regs);/ksu_syscall_table[orig_nr](); return regs->regs[0];/g' drivers/kernelsu/feature/sucompat.c
+          sed -i 's/return ksu_syscall_table\[orig_nr\]();/ksu_syscall_table[orig_nr](); return regs->regs[0];/g' drivers/kernelsu/feature/sucompat.c
           
           # 修改配置文件
           echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           echo "ccflags-y += -I\$(srctree)/drivers/kernelsu" >> drivers/kernelsu/Kbuild
           
-          # 创建必要的符号链接
+          # 创建符号链接
           mkdir -p drivers/kernelsu/kpm
           for dir in policy uapi include manager sulog supercall; do
             [ -d "drivers/kernelsu/$dir" ] && ln -sf "../$dir" "drivers/kernelsu/kpm/$dir"

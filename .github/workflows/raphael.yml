@@ -145,12 +145,12 @@ jobs:
           echo "CONFIG_USB_SERIAL_CP210X=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
           # Android Binder
-          echo "CONFIG_ANDROID=y" >> $DEFCONFIG
-          echo "CONFIG_ANDROID_BINDER_IPC=y" >> $DEFCONFIG
-          echo "CONFIG_ANDROID_BINDER_DEVICES=\"binder,hwbinder,vndbinder\"" >> $DEFCONFIG
+          # echo "CONFIG_ANDROID=y" >> $DEFCONFIG
+          # echo "CONFIG_ANDROID_BINDER_IPC=y" >> $DEFCONFIG
+          # echo "CONFIG_ANDROID_BINDER_DEVICES=\"binder,hwbinder,vndbinder\"" >> $DEFCONFIG
           # 禁用 tracing
-          echo "# CONFIG_TRACING is not set" >> $DEFCONFIG
-          echo "# CONFIG_FTRACE is not set" >> $DEFCONFIG
+          # echo "# CONFIG_TRACING is not set" >> $DEFCONFIG
+          # echo "# CONFIG_FTRACE is not set" >> $DEFCONFIG
 
       # 完整构建内核
       - name: Build the kernel

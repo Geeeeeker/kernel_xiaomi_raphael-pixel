@@ -30,7 +30,6 @@ jobs:
           cp -r SukiSU-Ultra/kernel drivers/kernelsu
           echo "obj-\$(CONFIG_KERNELSU) += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-
       # 3. 添加 rtl8188eus 无线网卡驱动（明确指定 master 分支）
       - name: Add rtl8188eus WiFi driver
         run: |
@@ -45,14 +44,12 @@ jobs:
             exit 1
           fi
           rm -rf rtl8188eus-repo
-
       # 4. 设置 QEMU 用户态支持（用于运行 arm64 Docker 容器）
       - name: 设置 QEMU 用户态支持
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user-static binfmt-support
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
       # 5. 设置 ccache
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -77,13 +74,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
           ccache --show-stats
-
       # 8. 部署 clang 工具链（如果缓存未命中）
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
-
       # 9. 保存 clang 工具链缓存
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
@@ -254,14 +249,12 @@ jobs:
               fi
               echo \"USB/IP user-space tools build and collection complete.\"
             "
-
       # 14. 打包 USB/IP 产物（内核模块 + 用户态工具）
       - name: 打包 USB/IP 产物
         run: |
           cd usbip-out
           tar czf ../usbip-arm64-bundle.tar.gz .
           cd ..
-
       # 15. 上传 USB/IP 捆绑包作为构建工件
       - name: 上传 USB/IP 捆绑包 (Artifact)
         uses: actions/upload-artifact@v4
@@ -281,7 +274,6 @@ jobs:
           fi
           mkdir -p $GITHUB_WORKSPACE/apk-output
           cp SukiSU-Ultra-Manager.apk $GITHUB_WORKSPACE/apk-output/
-
       # 17. 打包 AnyKernel3 内核安装包（并将 APK 一同打包）
       - name: Repack Kernel Artifacts
         run: |

@@ -180,11 +180,18 @@ jobs:
           make -j$(nproc) ARCH=arm64 LLVM=1 LLVM_IAS=1 O=out M=drivers/rtl8188eus modules
           cp out/drivers/rtl8188eus/8188eu.ko modules-package/
 
+      # 新增：安装 QEMU 模拟器，允许 x86 宿主机运行 arm64 容器
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      # 维持原有的编译步骤，但增加 --platform 参数确保调用正确架构
       - name: 编译 USB/IP 用户态工具
         run: |
           docker run --rm \
+            --platform linux/arm64 \
             -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
             arm64v8/ubuntu:22.04 \
             bash -c "
               set -e

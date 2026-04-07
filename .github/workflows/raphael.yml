@@ -141,15 +141,6 @@ jobs:
           echo "CONFIG_USB_SERIAL_CP210X=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
 
-          # ----- 添加 Android Binder 支持 -----
-          echo "CONFIG_ANDROID=y" >> $DEFCONFIG
-          echo "CONFIG_ANDROID_BINDER_IPC=y" >> $DEFCONFIG
-          echo "CONFIG_ANDROID_BINDER_DEVICES=\"binder,hwbinder,vndbinder\"" >> $DEFCONFIG
-
-          # ----- 禁用 TRACING / FTRACE（避免 binder 编译错误）-----
-          echo "# CONFIG_TRACING is not set" >> $DEFCONFIG
-          echo "# CONFIG_FTRACE is not set" >> $DEFCONFIG
-
           # 删除任何可能存在的 KernelSU 配置（确保不开启）
           sed -i '/CONFIG_KSU/d' $DEFCONFIG
           sed -i '/CONFIG_DEBUG_KERNEL/d' $DEFCONFIG

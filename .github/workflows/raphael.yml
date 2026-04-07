@@ -95,13 +95,13 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 10. 清理旧的编译输出（解决缓存污染问题）
+      # 10. 清理旧的编译输出
       - name: Clean old build output
         run: |
           rm -rf out
           mkdir -p out
 
-      # 11. 配置内核基础参数（包含 CONFIG_IKCONFIG_PROC）
+      # 11. 配置内核基础参数（包含 binder 支持）
       - name: 配置内核基础参数
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
@@ -119,7 +119,6 @@ jobs:
           echo "CONFIG_BPF_JIT=y" >> $DEFCONFIG
           echo "# CONFIG_BPF_JIT_ALWAYS_ON is not set" >> $DEFCONFIG
           echo "CONFIG_BPF_SYSCALL=y" >> $DEFCONFIG
-          # 新增配置
           echo "CONFIG_SYSVIPC=y" >> $DEFCONFIG
           echo "CONFIG_SYSVIPC_SYSCTL=y" >> $DEFCONFIG
           echo "CONFIG_SYSVIPC_COMPAT=y" >> $DEFCONFIG
@@ -135,41 +134,56 @@ jobs:
           echo "CONFIG_USBIP_CORE=m" >> $DEFCONFIG
           echo "CONFIG_USBIP_VHCI_HCD=m" >> $DEFCONFIG
           echo "CONFIG_USBIP_HOST=m" >> $DEFCONFIG
-          # 允许 section mismatch 警告而不中止编译
           echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y" >> $DEFCONFIG
-          # 添加 Backlight 支持
           echo "CONFIG_BACKLIGHT_CLASS_DEVICE=y" >> $DEFCONFIG
           echo "CONFIG_BACKLIGHT_QCOM=y" >> $DEFCONFIG
-          # 禁用模块版本控制
           echo "CONFIG_MODVERSIONS=n" >> $DEFCONFIG
-          # 开启 zstd 内存压缩
           echo "CONFIG_ZRAM=y" >> $DEFCONFIG
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
-          # 启用 SukiSU-Ultra (CONFIG_KSU)
+          # SukiSU-Ultra
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KPM=y" >> $DEFCONFIG
-          # KALLSYMS 依赖 DEBUG_KERNEL
           echo "CONFIG_DEBUG_KERNEL=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
-          # 启用 /proc/config.gz 支持，便于验证内核配置
+          # /proc/config.gz 支持
           echo "CONFIG_IKCONFIG=y" >> $DEFCONFIG
           echo "CONFIG_IKCONFIG_PROC=y" >> $DEFCONFIG
-          # 启用 rtl8188eus WiFi 驱动（以模块形式编译）
+          # rtl8188eus
           echo "CONFIG_RTL8188EU=m" >> $DEFCONFIG
-          # 基础框架
+          # USB 串行驱动
           echo "CONFIG_USB_SERIAL=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_CONSOLE=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_GENERIC=y" >> $DEFCONFIG
-          # 核心四大金刚
           echo "CONFIG_USB_SERIAL_CH341=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_FTDI_SIO=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_CP210X=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
+          # Android Binder 支持（修复 trace 编译错误）
+          echo "CONFIG_ANDROID=y" >> $DEFCONFIG
+          echo "CONFIG_ANDROID_BINDER_IPC=y" >> $DEFCONFIG
+          echo "CONFIG_ANDROID_BINDER_DEVICES=\"binder,hwbinder,vndbinder\"" >> $DEFCONFIG
         shell: bash
 
-      # 12. 完整构建内核
+      # 12. 修补 binder_trace.h 以解决缺少字符串数组的问题
+      - name: Patch binder_trace.h
+        run: |
+          BINDER_TRACE_H="drivers/android/binder_trace.h"
+          if [ -f "$BINDER_TRACE_H" ]; then
+            # 在文件开头（#include 之前）添加 extern 声明
+            sed -i '1i\
+/* Patch: add missing extern declarations for binder command/return strings */\
+extern const char *binder_command_strings[];\
+extern const char *binder_return_strings[];\
+' $BINDER_TRACE_H
+            echo "Patched $BINDER_TRACE_H"
+          else
+            echo "Warning: $BINDER_TRACE_H not found, skipping patch"
+          fi
+        shell: bash
+
+      # 13. 完整构建内核
       - name: Build the kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
@@ -178,7 +192,7 @@ jobs:
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(nproc) O=out
           ccache --show-stats
 
-      # 13. 编译 USB/IP 内核模块（关键修复：使用正确的 O=out）
+      # 14. 编译 USB/IP 内核模块
       - name: Compile USB/IP modules
         run: |
           export CLANG_PATH=$HOME/r547379/bin
@@ -190,12 +204,30 @@ jobs:
             O=out \
             M=drivers/usb/usbip \
             modules
-          mkdir -p usbip-out/modules
-          cp out/drivers/usb/usbip/*.ko usbip-out/modules/
+          mkdir -p modules-package
+          cp out/drivers/usb/usbip/usbip-core.ko modules-package/
+          cp out/drivers/usb/usbip/usbip-host.ko modules-package/
+          cp out/drivers/usb/usbip/vhci-hcd.ko modules-package/
           echo "=== USB/IP Module Vermagic ==="
-          modinfo usbip-out/modules/usbip-core.ko | grep vermagic || echo "Module vermagic check skipped"
+          modinfo modules-package/usbip-core.ko | grep vermagic
 
-      # 14. 编译 USB/IP 用户态工具（Docker）
+      # 15. 编译 rtl8188eus 模块
+      - name: Compile rtl8188eus module
+        run: |
+          export CLANG_PATH=$HOME/r547379/bin
+          export PATH=${CLANG_PATH}:${PATH}
+          make -j$(nproc) \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            O=out \
+            M=drivers/rtl8188eus \
+            modules
+          cp out/drivers/rtl8188eus/rtl8188eus.ko modules-package/
+          echo "=== rtl8188eus Module Vermagic ==="
+          modinfo modules-package/rtl8188eus.ko | grep vermagic
+
+      # 16. 编译 USB/IP 用户态工具（Docker）
       - name: 编译 USB/IP 用户态工具 (Docker 容器)
         run: |
           mkdir -p usbip-out/{bin,libs}
@@ -259,21 +291,21 @@ jobs:
               echo \"USB/IP user-space tools build complete.\"
             "
 
-      # 15. 打包 USB/IP 产物
-      - name: 打包 USB/IP 产物
+      # 17. 打包 USB/IP 用户态工具
+      - name: 打包 USB/IP 用户态工具
         run: |
           cd usbip-out
           tar czf ../usbip-arm64-bundle.tar.gz .
           cd ..
 
-      # 16. 上传 USB/IP 捆绑包
+      # 18. 上传 USB/IP 用户态工具包
       - name: 上传 USB/IP 捆绑包 (Artifact)
         uses: actions/upload-artifact@v4
         with:
           name: usbip-arm64-bundle
           path: usbip-arm64-bundle.tar.gz
 
-      # 17. 下载 SukiSU-Ultra 管理器 APK
+      # 19. 下载 SukiSU-Ultra 管理器 APK
       - name: Download SukiSU-Ultra Manager APK
         run: |
           LATEST_RELEASE_URL=$(curl -s https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest | grep "browser_download_url.*\.apk" | cut -d '"' -f 4)
@@ -283,40 +315,101 @@ jobs:
             echo "Could not fetch SukiSU-Ultra APK, falling back to official KernelSU APK"
             wget -O SukiSU-Ultra-Manager.apk https://github.com/tiann/KernelSU/releases/latest/download/KernelSU.apk
           fi
-          mkdir -p $GITHUB_WORKSPACE/apk-output
-          cp SukiSU-Ultra-Manager.apk $GITHUB_WORKSPACE/apk-output/
+          mkdir -p apk-output
+          cp SukiSU-Ultra-Manager.apk apk-output/
 
-      # 18. 打包 AnyKernel3 内核安装包
-      - name: Repack Kernel Artifacts
+      # 20. 打包 AnyKernel3（包含内核镜像、dtbo、APK 和所有 .ko 模块，并修改 anykernel.sh）
+      - name: Repack Kernel Artifacts with modules
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
+          # 复制内核镜像
           cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
+          # 复制 APK
           cp apk-output/SukiSU-Ultra-Manager.apk $HOME/AnyKernel3/
+          # 创建 modules 目录并复制所有 .ko 文件
+          mkdir -p $HOME/AnyKernel3/modules
+          cp modules-package/*.ko $HOME/AnyKernel3/modules/
+          # 创建自定义 anykernel.sh 以实现模块自动安装
+          cat > $HOME/AnyKernel3/anykernel.sh << 'EOF'
+          #!/sbin/sh
+          # AnyKernel3 script for SukiSU-Ultra + modules
+
+          # 设置变量
+          kernel.string=SukiSU-Ultra Kernel with extra modules
+          do.devicecheck=1
+          do.modules=1
+          do.systemless=1
+          do.cleanup=1
+          device.name1=raphael
+
+          # 模块安装目录（优先 vendor，如果不存在则 system）
+          MODULE_DEST=""
+          if [ -d /vendor/lib/modules ]; then
+            MODULE_DEST=/vendor/lib/modules
+          elif [ -d /system/lib/modules ]; then
+            MODULE_DEST=/system/lib/modules
+          else
+            MODULE_DEST=/system/lib/modules
+          fi
+
+          # 刷写内核
+          ui_print " - Flashing kernel"
+          block=/dev/block/by-name/boot
+          is_slot_device=1
+          ramdisk_compression=auto
+          
+          . /tmp/anykernel/tools/ak2-core.sh
+          
+          # 复制模块文件到系统
+          ui_print " - Installing kernel modules"
+          for mod in modules/*.ko; do
+            modname=$(basename $mod)
+            ui_print "   Installing $modname"
+            cp $mod $MODULE_DEST/$modname
+            chmod 644 $MODULE_DEST/$modname
+            chcon u:object_r:system_file:s0 $MODULE_DEST/$modname 2>/dev/null
+          done
+          
+          # 可选：运行 depmod（如果可用）
+          if [ -x /system/bin/depmod ]; then
+            ui_print " - Running depmod"
+            /system/bin/depmod -a
+          elif [ -x /sbin/depmod ]; then
+            ui_print " - Running depmod"
+            /sbin/depmod -a
+          fi
+
+          ui_print " - Done"
+          EOF
+          # 确保 anykernel.sh 可执行
+          chmod +x $HOME/AnyKernel3/anykernel.sh
+          # 打包 zip
           BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')
           COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
           ZIP_NAME="${BRANCH}-${COMMIT_HASH}.zip"
-          echo $ZIP_NAME
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-          mv "$HOME/AnyKernel3" "$GITHUB_WORKSPACE/AnyKernel3"
-          ls -lah $GITHUB_WORKSPACE/AnyKernel3
+          cd $HOME/AnyKernel3
+          zip -r9 $GITHUB_WORKSPACE/$ZIP_NAME . -x "*.git*" "*~" ".*"
+          cd $GITHUB_WORKSPACE
+          ls -lah $ZIP_NAME
         shell: bash
 
-      # 19. 上传内核安装包
+      # 21. 上传内核安装包
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
-          path: ${{ github.workspace }}/AnyKernel3/
+          path: ${{ env.ZIP_NAME }}
 
-      # 20. 上传 APK 单独作为构建工件
+      # 22. 上传 APK 单独作为构建工件
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: SukiSU-Ultra-Manager
           path: apk-output/SukiSU-Ultra-Manager.apk
 
-      # 21. 发布到 GitHub Release
+      # 23. 发布到 GitHub Release（仅在推送 tag 时执行）
       - name: Create Release and Upload USB/IP Bundle
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
@@ -328,3 +421,4 @@ jobs:
           files: |
             usbip-arm64-bundle.tar.gz
             apk-output/SukiSU-Ultra-Manager.apk
+            ${{ env.ZIP_NAME }}

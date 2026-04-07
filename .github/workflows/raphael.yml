@@ -209,19 +209,20 @@ jobs:
           # 9. 修复 patch_memory.c 中的 __pte_to_phys、copy_to_kernel_nofault 和 __flush_icache_range
           PATCH_MEM="drivers/kernelsu/hook/arm64/patch_memory.c"
           if [ -f "$PATCH_MEM" ]; then
-            # 替换 __pte_to_phys(*pte) 为 (pte_pfn(*pte) << PAGE_SHIFT)
             sed -i 's/__pte_to_phys(\*pte)/(pte_pfn(*pte) << PAGE_SHIFT)/g' "$PATCH_MEM"
-            # 添加必要的头文件包含（如果还没有）
             if ! grep -q "#include <linux/mm.h>" "$PATCH_MEM"; then
               sed -i '1i #include <linux/mm.h>' "$PATCH_MEM"
             fi
-            # 替换 copy_to_kernel_nofault 为 probe_kernel_write
             sed -i 's/ret = (int)copy_to_kernel_nofault(map, src, len);/ret = probe_kernel_write(map, src, len); if (ret) ret = -EFAULT;/g' "$PATCH_MEM"
-            # 替换 __flush_icache_range 为 flush_icache_range
             sed -i 's/__flush_icache_range/flush_icache_range/g' "$PATCH_MEM"
-            # 修改宏定义 ksu_flush_icache
             sed -i 's/#define ksu_flush_icache(start, end) __flush_icache_range/#define ksu_flush_icache(start, end) flush_icache_range/g' "$PATCH_MEM"
           fi
+          
+          # 10. 禁用 file_wrapper.c，因为 4.14 内核缺少必要的 API
+          # 从 Kbuild 中删除 infra/file_wrapper.o 行
+          sed -i '/infra\/file_wrapper.o/d' drivers/kernelsu/Kbuild
+          # 也可以将 file_wrapper.c 的内容清空，以防万一
+          echo "// Disabled for 4.14 kernel due to missing APIs" > drivers/kernelsu/infra/file_wrapper.c
 
       - name: Build the kernel
         run: |

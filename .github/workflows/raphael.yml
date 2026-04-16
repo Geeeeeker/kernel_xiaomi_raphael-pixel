@@ -158,6 +158,8 @@ jobs:
           # KernelSU Next 配置（通过 kprobe 自动集成）
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KSU_KPROBE_HOOKS=y" >> $DEFCONFIG
+          # 禁用 SELinux 钩子（避免 cpus_allowed 编译错误）
+          echo "# CONFIG_KSU_SELINUX_HOOKS is not set" >> $DEFCONFIG
         shell: bash
 
       # 11. 完整构建内核（使用 ccache）

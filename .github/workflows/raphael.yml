@@ -2,11 +2,7 @@ name: Continues testing
 
 on:
   push:
-    branches: [ "**" ]
-    tags:
-      - 'v*'
   pull_request:
-    branches: [ "**" ]
 
 jobs:
   build:
@@ -14,39 +10,12 @@ jobs:
     env:
       KBUILD_BUILD_USER: NATO66613
       KBUILD_BUILD_HOST: KREMLIN
-
     steps:
-      # 1. 检出仓库（新内核源码，分支 16.0）
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          repository: Geeeeeker/kernel_xiaomi_raphael-pixel
-          ref: refs/heads/16.0 
           fetch-depth: 1
 
-      # 2. 添加 rtl8188eus 无线网卡驱动
-      - name: Add rtl8188eus WiFi driver
-        run: |
-          export GIT_ASKPASS=echo
-          git clone --depth=1 --branch master https://github.com/Geeeeeker/android_kernel_xiaomi_sdm845.git rtl8188eus-repo
-          if [ -d "rtl8188eus-repo/drivers/rtl8188eus" ]; then
-            cp -r rtl8188eus-repo/drivers/rtl8188eus drivers/
-            echo "obj-\$(CONFIG_RTL8188EU) += rtl8188eus/" >> drivers/Makefile
-            echo 'source "drivers/rtl8188eus/Kconfig"' >> drivers/Kconfig
-          else
-            echo "Error: rtl8188eus directory not found in cloned repo"
-            exit 1
-          fi
-          rm -rf rtl8188eus-repo
-
-      # 3. 设置 QEMU 用户态支持（用于运行 arm64 Docker 容器）
-      - name: 设置 QEMU 用户态支持
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
-          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
-      # 4. 设置 ccache
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -56,7 +25,6 @@ jobs:
             kernel-build-cache
           max-size: '10G'
 
-      # 5. 恢复 clang 工具链缓存
       - name: Restore toolchain cache
         id: restore-clang
         uses: actions/cache/restore@v4
@@ -64,20 +32,18 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 6. 安装构建依赖
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
+          
           ccache --show-stats
 
-      # 7. 部署 clang 工具链（如果缓存未命中）
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
 
-      # 8. 保存 clang 工具链缓存
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         id: cache-clang-save
@@ -86,255 +52,44 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 9. 配置内核基础参数（修改 defconfig，包含 KernelSU 和 Binder 支持）
-      - name: 配置内核基础参数
-        run: |
-          DEFCONFIG="arch/arm64/configs/raphael_defconfig"
-          # 原有配置
-          echo "CONFIG_MODULES=y" >> $DEFCONFIG
-          echo "CONFIG_KPROBES=y" >> $DEFCONFIG
-          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
-          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
-          echo "CONFIG_OVERLAY_FS=y" >> $DEFCONFIG
-          sed -i 's/CONFIG_LTO=y/CONFIG_LTO=n/' $DEFCONFIG
-          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_CLANG=n/' $DEFCONFIG
-          sed -i 's/CONFIG_THINLTO=y/CONFIG_THINLTO=n/' $DEFCONFIG
-          echo "CONFIG_LTO_NONE=y" >> $DEFCONFIG
-          echo "CONFIG_CC_WERROR=n" >> $DEFCONFIG
-          echo "CONFIG_BPF_JIT=y" >> $DEFCONFIG
-          echo "# CONFIG_BPF_JIT_ALWAYS_ON is not set" >> $DEFCONFIG
-          echo "CONFIG_BPF_SYSCALL=y" >> $DEFCONFIG
-          # 新增配置
-          echo "CONFIG_SYSVIPC=y" >> $DEFCONFIG
-          echo "CONFIG_SYSVIPC_SYSCTL=y" >> $DEFCONFIG
-          echo "CONFIG_SYSVIPC_COMPAT=y" >> $DEFCONFIG
-          echo "CONFIG_EPOLL=y" >> $DEFCONFIG
-          echo "CONFIG_EVENTFD=y" >> $DEFCONFIG
-          echo "CONFIG_SIGNALFD=y" >> $DEFCONFIG
-          echo "CONFIG_INOTIFY_USER=y" >> $DEFCONFIG
-          echo "CONFIG_SHMEM=y" >> $DEFCONFIG
-          echo "CONFIG_TMPFS=y" >> $DEFCONFIG
-          echo "CONFIG_TMPFS_POSIX_ACL=y" >> $DEFCONFIG
-          echo "CONFIG_TMPFS_XATTR=y" >> $DEFCONFIG
-          # USB/IP 配置
-          echo "CONFIG_USBIP_CORE=m" >> $DEFCONFIG
-          echo "CONFIG_USBIP_VHCI_HCD=m" >> $DEFCONFIG
-          echo "CONFIG_USBIP_HOST=m" >> $DEFCONFIG
-          # 允许 section mismatch 警告而不中止编译
-          echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y" >> $DEFCONFIG
-          # 添加 Backlight 支持
-          echo "CONFIG_BACKLIGHT_CLASS_DEVICE=y" >> $DEFCONFIG
-          echo "CONFIG_BACKLIGHT_QCOM=y" >> $DEFCONFIG
-          # 禁用模块版本控制（USB/IP 需要）
-          echo "CONFIG_MODVERSIONS=n" >> $DEFCONFIG
-          # 开启 zstd 内存压缩
-          echo "CONFIG_ZRAM=y" >> $DEFCONFIG
-          echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
-          echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
-          # 启用 rtl8188eus WiFi 驱动
-          echo "CONFIG_RTL8188EU=y" >> $DEFCONFIG
-          # 基础 USB Serial 框架
-          echo "CONFIG_USB_SERIAL=y" >> $DEFCONFIG
-          echo "CONFIG_USB_SERIAL_CONSOLE=y" >> $DEFCONFIG
-          echo "CONFIG_USB_SERIAL_GENERIC=y" >> $DEFCONFIG
-          # USB Serial 驱动
-          echo "CONFIG_USB_SERIAL_CH341=y" >> $DEFCONFIG
-          echo "CONFIG_USB_SERIAL_FTDI_SIO=y" >> $DEFCONFIG
-          echo "CONFIG_USB_SERIAL_CP210X=y" >> $DEFCONFIG
-          echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
-
-          # Android Binder 支持
-          echo "CONFIG_ANDROID=y" >> $DEFCONFIG
-          echo "CONFIG_ANDROID_BINDER_IPC=y" >> $DEFCONFIG
-          echo "CONFIG_ANDROID_BINDER_DEVICES=\"binder,hwbinder,vndbinder\"" >> $DEFCONFIG
-
-          # 禁用 TRACING / FTRACE（避免 binder 编译错误）
-          echo "# CONFIG_TRACING is not set" >> $DEFCONFIG
-          echo "# CONFIG_FTRACE is not set" >> $DEFCONFIG
-
-          # KernelSU 配置（源码已集成，直接启用）
-          echo "CONFIG_KSU=y" >> $DEFCONFIG
-          echo "CONFIG_KSU_KPROBE_HOOKS=y" >> $DEFCONFIG
-        shell: bash
-
-      # 10. 完整构建内核（使用 ccache）
-      - name: Build the kernel with ccache
+      - name: Build the kernel with `ccache`
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig O=out
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo) O=out
+          
+          # Use ccache explicitly
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
+
+          # Show ccache stats after build
           ccache --show-stats
           ccache --show-config
         shell: bash
 
-      # 11. 编译 USB/IP 内核模块（单独调用，确保生成 .ko）
-      - name: 编译 USB/IP 内核模块 (主机)
-        run: |
-          export CLANG_PATH=$HOME/r547379/bin
-          export PATH=${CLANG_PATH}:${PATH}
-          make -j$(nproc --all) \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            O=out \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            M=drivers/usb/usbip \
-            modules
-          mkdir -p $GITHUB_WORKSPACE/usbip-out/modules
-          cp out/drivers/usb/usbip/*.ko $GITHUB_WORKSPACE/usbip-out/modules/
-        shell: bash
-
-      # 12. 编译 USB/IP 用户态工具（Docker 容器，arm64 环境，自动收集依赖）
-      - name: 编译 USB/IP 用户态工具 (Docker 容器)
-        run: |
-          mkdir -p usbip-out/{bin,libs}
-          docker run --rm --platform linux/arm64 \
-            --memory=4g \
-            -v ${{ github.workspace }}:/workspace \
-            -v ${{ github.workspace }}/usbip-out:/output \
-            -w /workspace \
-            arm64v8/ubuntu:22.04 \
-            bash -c "
-              set -e
-              export DEBIAN_FRONTEND=noninteractive
-              ulimit -s unlimited
-              apt update
-              apt install -y \
-                build-essential \
-                autoconf \
-                libtool \
-                pkg-config \
-                libudev-dev \
-                libssl-dev \
-                flex \
-                bison \
-                file
-              cd tools/usb/usbip
-              ./autogen.sh
-              # 使用 -O0 完全禁用优化，避免 gcc 内部错误
-              ./configure CFLAGS=\"-O0 -Wno-error\" --prefix=/usr
-              # 单线程编译
-              make CFLAGS=\"-O0 -Wno-error\" -j1
-              # 复制二进制和库
-              cp src/.libs/usbip /output/bin/
-              cp src/.libs/usbipd /output/bin/
-              cp libsrc/.libs/libusbip.so.0* /output/libs/
-              # 自动收集依赖库
-              cd /output
-              BINARIES=\"bin/usbip bin/usbipd libs/libusbip.so.0*\"
-              DEPS=\"\"
-              for file in \$BINARIES; do
-                if [ -f \"\$file\" ]; then
-                  echo \"Collecting dependencies for \$file...\"
-                  needed=\$(readelf -d \"\$file\" | grep NEEDED | awk '{print \$5}' | tr -d '[]' || true)
-                  for lib in \$needed; do
-                    if [[ \"\$DEPS\" != *\"\$lib\"* ]]; then
-                      DEPS=\"\$DEPS \$lib\"
-                    fi
-                  done
-                fi
-              done
-              for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
-                echo \"Searching for library: \$lib\"
-                libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1 || true)
-                if [ -n \"\$libpath\" ]; then
-                  echo \"Found: \$libpath\"
-                  cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
-                  # 复制所有相关的符号链接
-                  for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
-                    cp -n \"\$reallib\" libs/ 2>/dev/null || true
-                  done
-                else
-                  echo \"Warning: library \$lib not found\"
-                fi
-              done
-              # 复制动态链接器
-              ld_linux=\"/lib/ld-linux-aarch64.so.1\"
-              if [ -f \"\$ld_linux\" ]; then
-                cp -P \"\$ld_linux\" libs/
-              fi
-              echo \"USB/IP user-space tools build and library collection complete.\"
-            "
-
-      # 13. 打包 USB/IP 产物（内核模块 + 用户态工具）
-      - name: 打包 USB/IP 产物
-        run: |
-          cd usbip-out
-          tar czf ../usbip-arm64-bundle.tar.gz .
-          cd ..
-
-      # 14. 上传 USB/IP 捆绑包作为构建工件
-      - name: 上传 USB/IP 捆绑包 (Artifact)
-        uses: actions/upload-artifact@v4
-        with:
-          name: usbip-arm64-bundle
-          path: usbip-arm64-bundle.tar.gz
-
-      # 15. 提取 rtl8188.ko 模块并独立发布
-      - name: Extract rtl8188.ko module
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/rtl8188-module
-          RTL_MODULE=$(find out -name "rtl8188.ko" -type f | head -1)
-          if [ -n "$RTL_MODULE" ]; then
-            cp "$RTL_MODULE" $GITHUB_WORKSPACE/rtl8188-module/rtl8188.ko
-            echo "rtl8188.ko copied from $RTL_MODULE"
-          else
-            echo "Warning: rtl8188.ko not found, trying alternative names..."
-            RTL_ALT=$(find out -name "*8188*.ko" -type f | head -1)
-            if [ -n "$RTL_ALT" ]; then
-              cp "$RTL_ALT" $GITHUB_WORKSPACE/rtl8188-module/rtl8188.ko
-              echo "Copied alternative module as rtl8188.ko from $RTL_ALT"
-            else
-              echo "Error: No rtl8188 related module found"
-              exit 1
-            fi
-          fi
-          # 可选：压缩模块文件
-          cd $GITHUB_WORKSPACE/rtl8188-module
-          tar czf ../rtl8188-module.tar.gz rtl8188.ko
-          cd $GITHUB_WORKSPACE
-
-      # 16. 上传 rtl8188 模块作为独立工件
-      - name: Upload rtl8188 Module Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rtl8188-module
-          path: rtl8188-module.tar.gz
-
-      # 17. 打包 AnyKernel3 内核安装包（仅包含内核映像与 dtbo）
       - name: Repack Kernel Artifacts
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
           cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
           cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
+
+          # Determine branch name and commit hash (first 6 characters)
           BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')
           COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
           ZIP_NAME="${BRANCH}-${COMMIT_HASH}.zip"
+          echo $ZIP_NAME
+
+          # Export ZIP_NAME for later steps
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-          cd $HOME/AnyKernel3
-          zip -r9 $GITHUB_WORKSPACE/${ZIP_NAME} .
-          cd $GITHUB_WORKSPACE
-          ls -lah ${ZIP_NAME}
+
+          # Move entire AnyKernel3 directory to workspace
+          mv "$HOME/AnyKernel3" "$GITHUB_WORKSPACE/AnyKernel3"
+
+          # Verify contents of AnyKernel3 in workspace
+          ls -lah $GITHUB_WORKSPACE/AnyKernel3
         shell: bash
 
-      # 18. 上传内核安装包作为构建工件
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
-          path: ${{ github.workspace }}/${{ env.ZIP_NAME }}
-
-      # 19. 发布到 GitHub Release（仅在推送 tag 时执行）
-      - name: Create Release and Upload Assets
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          files: |
-            usbip-arm64-bundle.tar.gz
-            ${{ env.ZIP_NAME }}
-            rtl8188-module.tar.gz
+          name: ${{ env.ZIP_NAME }}  # Dynamic naming for artifact
+          path: ${{ github.workspace }}/AnyKernel3/

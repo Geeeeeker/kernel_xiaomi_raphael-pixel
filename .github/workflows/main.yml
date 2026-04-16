@@ -126,7 +126,7 @@ jobs:
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
           # 启用 rtl8188eus WiFi 驱动
-          echo "CONFIG_RTL8188EU=m" >> $DEFCONFIG
+          echo "CONFIG_RTL8188EU=y" >> $DEFCONFIG
           # 基础 USB Serial 框架
           echo "CONFIG_USB_SERIAL=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_CONSOLE=y" >> $DEFCONFIG

@@ -187,6 +187,24 @@ jobs:
           if [ -f net/netfilter/xt_qtaguid.c ]; then
               patch -p0 < utils/xt_qtaguid.patch
           fi
+          # ========== 新增修复块 ==========
+          echo "Applying source fixes for old kernel..."
+          if ! grep -q "typedef.*vm_fault_t" include/linux/mm_types.h; then
+              echo "typedef int vm_fault_t;" >> include/linux/mm_types.h
+          fi
+          awk '
+          BEGIN { count=0; skip=0 }
+          /^static inline void \*kvcalloc/ {
+              count++
+              if (count == 2) skip=1
+          }
+          skip && /^}/ {
+              skip=0
+              next
+          }
+          !skip
+          ' include/linux/mm.h > mm.h.tmp && mv mm.h.tmp include/linux/mm.h
+          # ================================
         shell: bash
           
       # 10. 完整构建内核（使用 ccache）

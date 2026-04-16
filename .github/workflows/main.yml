@@ -146,12 +146,6 @@ jobs:
           # KernelSU 配置（源码已集成，直接启用）
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KSU_KPROBE_HOOKS=y" >> $DEFCONFIG
-        shell: bash
-
-      - name: 配置 LXC 和 Docker 支持
-        working-directory: kernel
-        run: |
-          DEFCONFIG="arch/arm64/configs/raphael_defconfig"
           rm -rf utils
           git clone https://github.com/tomxi1997/lxc-docker-support-for-android.git utils
 
@@ -193,6 +187,7 @@ jobs:
           if [ -f net/netfilter/xt_qtaguid.c ]; then
               patch -p0 < utils/xt_qtaguid.patch
           fi
+        shell: bash
           
       # 10. 完整构建内核（使用 ccache）
       - name: Build the kernel with ccache

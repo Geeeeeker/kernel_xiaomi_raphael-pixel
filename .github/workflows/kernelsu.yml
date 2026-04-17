@@ -194,77 +194,41 @@ jobs:
           echo "CONFIG_ANDROID_BINDER_IPC=y" >> $DEFCONFIG
           echo "CONFIG_ANDROID_BINDER_DEVICES=\"binder,hwbinder,vndbinder\"" >> $DEFCONFIG
 
-          echo "# CONFIG_TRACING is not set" >> $DEFCONFIG
-          echo "# CONFIG_FTRACE is not set" >> $DEFCONFIG
-
-          sed -i '/CONFIG_BTRFS_FS/d' $DEFCONFIG
-          sed -i '/CONFIG_ZSTD/d' $DEFCONFIG
-          sed -i '/CONFIG_CRYPTO_ZSTD/d' $DEFCONFIG
-          echo "# CONFIG_BTRFS_FS is not set" >> $DEFCONFIG
-          echo "# CONFIG_BTRFS_FS_ZSTD is not set" >> $DEFCONFIG
-          echo "# CONFIG_ZSTD_COMPRESS is not set" >> $DEFCONFIG
-          echo "# CONFIG_ZSTD_DECOMPRESS is not set" >> $DEFCONFIG
-
-          rm -rf utils
-          git clone https://github.com/tomxi1997/lxc-docker-support-for-android.git utils
-
-          sed -i '/select CFS_BANDWIDTH/d' utils/Kconfig
-          sed -i '/select DOCKER_STATISTICS/d' utils/Kconfig
-          sed -i '/select BLK_DEV_THROTTLING/d' utils/Kconfig
-          sed -i '/select CFQ_GROUP_IOSCHED/d' utils/Kconfig
-          sed -i '/select BRIDGE_VLAN_FILTERING/d' utils/Kconfig
-
-          echo 'source "utils/Kconfig"' >> "Kconfig"
+          # Android Binder
+          echo "CONFIG_ANDROID=y" >> $DEFCONFIG
+          echo "CONFIG_ANDROID_BINDER_IPC=y" >> $DEFCONFIG
+          echo "CONFIG_ANDROID_BINDER_DEVICES=\"binder,hwbinder,vndbinder\"" >> $DEFCONFIG
+          
+          # Docker 支持配置
           echo "CONFIG_DOCKER=y" >> $DEFCONFIG
-
-          echo "# CONFIG_CFS_BANDWIDTH is not set" >> $DEFCONFIG
-          echo "# CONFIG_DOCKER_STATISTICS is not set" >> $DEFCONFIG
-
-          sed -i '/CONFIG_ANDROID_PARANOID_NETWORK/d' $DEFCONFIG
-          echo "# CONFIG_ANDROID_PARANOID_NETWORK is not set" >> $DEFCONFIG
-
-          echo "# CONFIG_BLK_DEV_THROTTLING is not set" >> $DEFCONFIG
+          echo "CONFIG_PID_NS=y" >> $DEFCONFIG
+          echo "CONFIG_IPC_NS=y" >> $DEFCONFIG
+          echo "CONFIG_UTS_NS=y" >> $DEFCONFIG
+          echo "CONFIG_VETH=y" >> $DEFCONFIG
+          echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> $DEFCONFIG
+          echo "CONFIG_NETFILTER_XT_MATCH_IPVS=y" >> $DEFCONFIG
+          echo "CONFIG_POSIX_MQUEUE=y" >> $DEFCONFIG
+          echo "CONFIG_CGROUP_PIDS=y" >> $DEFCONFIG
+          echo "CONFIG_BLK_DEV_THROTTLING=y" >> $DEFCONFIG
+          echo "CONFIG_CGROUP_PERF=y" >> $DEFCONFIG
+          echo "CONFIG_VXLAN=y" >> $DEFCONFIG
+          echo "CONFIG_CGROUP_HUGETLB=y" >> $DEFCONFIG
+          echo "CONFIG_NET_CLS_CGROUP=y" >> $DEFCONFIG
+          echo "CONFIG_CGROUP_NET_PRIO=y" >> $DEFCONFIG
+          echo "CONFIG_IP_VS=y" >> $DEFCONFIG
+          echo "CONFIG_IP_VS_NFCT=y" >> $DEFCONFIG
+          echo "CONFIG_IP_VS_PROTO_TCP=y" >> $DEFCONFIG
+          echo "CONFIG_IP_VS_PROTO_UDP=y" >> $DEFCONFIG
+          echo "CONFIG_IP_VS_RR=y" >> $DEFCONFIG
+          echo "CONFIG_SECURITY_APPARMOR=y" >> $DEFCONFIG
+          
+          # 设置内核本地版本
+          echo 'CONFIG_LOCALVERSION="-Geeeeeker-perf"' >> $DEFCONFIG
+          
+          # 禁用 CFQ 调度器（避免 Clang 编译错误）
+          sed -i 's/CONFIG_IOSCHED_CFQ=y/CONFIG_IOSCHED_CFQ=n/' $DEFCONFIG
+          echo "# CONFIG_IOSCHED_CFQ is not set" >> $DEFCONFIG
           echo "# CONFIG_CFQ_GROUP_IOSCHED is not set" >> $DEFCONFIG
-
-          sed -i '/raphael-sm8150.dtsi/d' arch/arm64/boot/dts/qcom/Makefile
-          sed -i '/qvr/d' arch/arm64/boot/dts/qcom/Makefile
-          sed -i '/interposer/d' arch/arm64/boot/dts/qcom/Makefile
-
-          echo "Applying source fixes for old kernel..."
-
-          if ! grep -q "typedef.*vm_fault_t" include/linux/mm_types.h; then
-              sed -i '/#include <linux\/mm_types_task.h>/i typedef int vm_fault_t;' include/linux/mm_types.h
-          fi
-
-          awk '
-          BEGIN { count=0; skip=0 }
-          /^static inline void \*kvcalloc/ {
-              count++
-              if (count == 2) skip=1
-          }
-          skip && /^}/ {
-              skip=0
-              next
-          }
-          !skip
-          ' include/linux/mm.h > mm.h.tmp && mv mm.h.tmp include/linux/mm.h
-
-          chmod +x utils/runcpatch.sh
-          if [ -f kernel/cgroup/cgroup.c ]; then
-              sh utils/runcpatch.sh kernel/cgroup/cgroup.c
-          fi
-          if [ -f kernel/cgroup.c ]; then
-              sh utils/runcpatch.sh kernel/cgroup.c
-          fi
-          if [ -f net/netfilter/xt_qtaguid.c ]; then
-              patch -p0 < utils/xt_qtaguid.patch || true
-          fi
-
-          CFQ_FILE="block/cfq-iosched.c"
-          if [ -f "$CFQ_FILE" ]; then
-              sed -i '/^#define cfq_log_cfqq/,/while (0)/ { /break;/d; }' "$CFQ_FILE"
-              echo "Fixed cfq_log_cfqq macro in $CFQ_FILE"
-          fi
 
       - name: Build the kernel with ccache
         run: |
@@ -274,21 +238,6 @@ jobs:
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig O=out
 
           cd out
-          echo "Disabling Btrfs and related features forcefully..."
-          sed -i 's/^CONFIG_BTRFS_FS=.*$/# CONFIG_BTRFS_FS is not set/' .config
-          sed -i 's/^CONFIG_BTRFS_FS_POSIX_ACL=.*$/# CONFIG_BTRFS_FS_POSIX_ACL is not set/' .config
-          sed -i 's/^CONFIG_BTRFS_FS_CHECK_INTEGRITY=.*$/# CONFIG_BTRFS_FS_CHECK_INTEGRITY is not set/' .config
-          sed -i 's/^CONFIG_BTRFS_FS_RUN_SANITY_TESTS=.*$/# CONFIG_BTRFS_FS_RUN_SANITY_TESTS is not set/' .config
-          sed -i 's/^CONFIG_BTRFS_DEBUG=.*$/# CONFIG_BTRFS_DEBUG is not set/' .config
-          sed -i 's/^CONFIG_BTRFS_ASSERT=.*$/# CONFIG_BTRFS_ASSERT is not set/' .config
-          sed -i 's/^CONFIG_BTRFS_EXPERIMENTAL=.*$/# CONFIG_BTRFS_EXPERIMENTAL is not set/' .config
-          sed -i 's/^CONFIG_BTRFS_FS_REF_VERIFY=.*$/# CONFIG_BTRFS_FS_REF_VERIFY is not set/' .config
-
-          sed -i 's/^CONFIG_RAID6_PQ=.*$/# CONFIG_RAID6_PQ is not set/' .config
-          sed -i 's/^CONFIG_XOR_BLOCKS=.*$/# CONFIG_XOR_BLOCKS is not set/' .config
-          sed -i 's/^CONFIG_ZSTD_COMPRESS=.*$/# CONFIG_ZSTD_COMPRESS is not set/' .config
-          sed -i 's/^CONFIG_ZSTD_DECOMPRESS=.*$/# CONFIG_ZSTD_DECOMPRESS is not set/' .config
-
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
 
           if grep -q "^CONFIG_BTRFS_FS=y" .config; then
@@ -296,15 +245,7 @@ jobs:
               sed -i 's/^CONFIG_BTRFS_FS=y/# CONFIG_BTRFS_FS is not set/' .config
               make LLVM=1 LLVM_IAS=1 CC="ccache clang" olddefconfig
           fi
-          grep "^CONFIG_BTRFS_FS" .config || echo "Btrfs successfully disabled."
           cd ..
-
-          # === 彻底绕过 Btrfs 编译（修复 Kconfig 引用并移动目录） ===
-          echo "Removing btrfs from fs/Kconfig and moving directory..."
-          sed -i '/source "fs\/btrfs\/Kconfig"/d' fs/Kconfig
-          if [ -d fs/btrfs ]; then
-              mv fs/btrfs fs/btrfs_disabled_backup
-          fi
 
           # 开始编译
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo) O=out

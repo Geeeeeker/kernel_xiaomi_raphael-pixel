@@ -180,7 +180,7 @@ jobs:
 
           echo "CONFIG_ZRAM=y" >> $DEFCONFIG
 
-          echo "CONFIG_RTL8188EU=y" >> $DEFCONFIG
+          echo "CONFIG_RTL8188EU=m" >> $DEFCONFIG
 
           echo "CONFIG_USB_SERIAL=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_CONSOLE=y" >> $DEFCONFIG

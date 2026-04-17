@@ -31,7 +31,7 @@ jobs:
           echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
-      # 3. 添加 rtl8188eus 无线网卡驱动（明确指定 master 分支）
+      # 3. 添加 rtl8188eus 无线网卡驱动
       - name: Add rtl8188eus WiFi driver
         run: |
           export GIT_ASKPASS=echo
@@ -93,11 +93,11 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 10. 配置内核基础参数（修改 defconfig）
+      # 10. 配置内核基础参数（defconfig）
       - name: 配置内核基础参数
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
-          # 原有配置
+          # 原有基础配置
           echo "CONFIG_MODULES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -111,7 +111,6 @@ jobs:
           echo "CONFIG_BPF_JIT=y" >> $DEFCONFIG
           echo "# CONFIG_BPF_JIT_ALWAYS_ON is not set" >> $DEFCONFIG
           echo "CONFIG_BPF_SYSCALL=y" >> $DEFCONFIG
-          # 新增配置
           echo "CONFIG_SYSVIPC=y" >> $DEFCONFIG
           echo "CONFIG_SYSVIPC_SYSCTL=y" >> $DEFCONFIG
           echo "CONFIG_SYSVIPC_COMPAT=y" >> $DEFCONFIG
@@ -123,39 +122,63 @@ jobs:
           echo "CONFIG_TMPFS=y" >> $DEFCONFIG
           echo "CONFIG_TMPFS_POSIX_ACL=y" >> $DEFCONFIG
           echo "CONFIG_TMPFS_XATTR=y" >> $DEFCONFIG
-          # USB/IP 的配置
           echo "CONFIG_USBIP_CORE=y" >> $DEFCONFIG
           echo "CONFIG_USBIP_VHCI_HCD=y" >> $DEFCONFIG
           echo "CONFIG_USBIP_HOST=y" >> $DEFCONFIG
-          # 允许 section mismatch 警告而不中止编译
           echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y" >> $DEFCONFIG
-          # 添加 Backlight 支持（解决 undefined symbol 错误）
           echo "CONFIG_BACKLIGHT_CLASS_DEVICE=y" >> $DEFCONFIG
           echo "CONFIG_BACKLIGHT_QCOM=y" >> $DEFCONFIG
-          # 禁用模块版本控制（USB/IP 需要）
           echo "CONFIG_MODVERSIONS=n" >> $DEFCONFIG
-          # 开启 zstd 内存压缩（ZRAM 使用 zstd）
           echo "CONFIG_ZRAM=y" >> $DEFCONFIG
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
-          # 启用 KernelSU
-          echo "CONFIG_KSU=y" >> $DEFCONFIG
-          echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
-          echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
-          # 启用 rtl8188eus WiFi 驱动（以模块形式编译）
           echo "CONFIG_RTL8188EU=y" >> $DEFCONFIG
-          # 基础框架
           echo "CONFIG_USB_SERIAL=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_CONSOLE=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_GENERIC=y" >> $DEFCONFIG
-          # 核心四大金刚 (覆盖 95% 以上市售模块)
           echo "CONFIG_USB_SERIAL_CH341=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_FTDI_SIO=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_CP210X=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
+
+          # ------------------ KernelSU 手动 hook 配置 ------------------
+          echo "CONFIG_KSU=y" >> $DEFCONFIG
+          echo "CONFIG_KSU_MANUAL_HOOK=y" >> $DEFCONFIG   # 启用非 kprobe 模式
+          echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
+          echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
         shell: bash
 
-      # 11. 完整构建内核（使用 ccache）
+      # 11. 为 KernelSU 手动 hook 模式打内核补丁
+      - name: Apply manual hook patches for KernelSU
+        run: |
+          # 在 fs/exec.c 中插入 hook（用于监控 execve）
+          if grep -q "ksu_handle_execveat" fs/exec.c; then
+            echo "Manual hook already applied to exec.c, skipping."
+          else
+            # 定位 do_execveat_common 函数中的合适插入点（通常在 fd_install 之后）
+            sed -i '/fd_install(fd, file);/a\
+            \    #ifdef CONFIG_KSU_MANUAL_HOOK\
+            \    extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv, void *envp, int *flags);\
+            \    ksu_handle_execveat(&fd, &filename, &argv, &env, &flags);\
+            \    #endif' fs/exec.c
+          fi
+
+          # 在 fs/open.c 中插入 hook（用于监控 openat）
+          if grep -q "ksu_handle_openat" fs/open.c; then
+            echo "Manual hook already applied to open.c, skipping."
+          else
+            # 定位 do_sys_open 函数中的合适插入点（通常在 build_open_flags 之后）
+            sed -i '/build_open_flags(flags, mode, &opened);/a\
+            \    #ifdef CONFIG_KSU_MANUAL_HOOK\
+            \    extern int ksu_handle_openat(int *dfd, const char __user **filename_user, int *flags, int *mode);\
+            \    ksu_handle_openat(&dfd, &filename, &flags, &mode);\
+            \    #endif' fs/open.c
+          fi
+
+          # 如果您的内核使用 openat2 或 faccessat 等，可能需要额外补丁，但基础监控以上两个已足够。
+        shell: bash
+
+      # 12. 完整构建内核（使用 ccache）
       - name: Build the kernel with ccache
         run: |
           export CLANG_PATH=$HOME/r547379/bin
@@ -194,11 +217,8 @@ jobs:
                 patchelf
               cd tools/usb/usbip
               ./autogen.sh
-              # 使用 -O0 完全禁用优化，避免 gcc 内部错误
               ./configure CFLAGS=\"-O0 -Wno-error\" --prefix=/usr
-              # 单线程编译
               make CFLAGS=\"-O0 -Wno-error\" -j1
-              # 复制二进制和库
               cp src/.libs/usbip /output/bin/
               cp src/.libs/usbipd /output/bin/
               cp libsrc/.libs/libusbip.so.0* /output/libs/
@@ -236,7 +256,7 @@ jobs:
               echo \"USB/IP user-space tools build and collection complete.\"
             "
 
-      # 17. 打包 AnyKernel3 内核安装包（并将 APK 一同打包）
+      # 14. 打包 AnyKernel3 内核安装包
       - name: Repack Kernel Artifacts
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
@@ -251,15 +271,14 @@ jobs:
           ls -lah $GITHUB_WORKSPACE/AnyKernel3
         shell: bash
 
-      # 18. 上传内核安装包作为构建工件
+      # 15. 上传内核安装包作为构建工件
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ github.workspace }}/AnyKernel3/
 
-
-      # 20. 发布到 GitHub Release（仅在推送 tag 时执行）
+      # 16. 发布到 GitHub Release（仅在推送 tag 时执行）
       - name: Create Release and Upload USB/IP Bundle
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1

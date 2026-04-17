@@ -23,78 +23,59 @@ jobs:
         with:
           fetch-depth: 1
 
-      # ================= 集成 KernelSU（手动稳健方式）=================
+      # ================= 集成 KernelSU（完全模拟 main.yml 流程）=================
       - name: Download KernelSU from 'SoDebug/KernelSU'
         id: get-kernelsu
         run: |
           mkdir -p $KernelSU_Dir
           git clone https://github.com/SoDebug/KernelSU.git $KernelSU_Dir
-
       - name: Get KernelSU id
         id: get-kernelsu-id
         run: |
           cd $KernelSU_Dir
           echo "kernelsu_id=$(git show -s --date=short --format="%h")" >> $GITHUB_ENV
-
       - name: Download Patch from 'SoDebug/KernelSU'
         id: get-patch
         run: |
           mkdir -p $Setup_Dir
           git clone -b setup https://github.com/SoDebug/KernelSU.git $Setup_Dir
-
       - name: Get Patch id
         id: get-patch-id
         run: |
           cd $Setup_Dir
           echo "patch_id=$(git show -s --date=short --format="%h")" >> $GITHUB_ENV
-
-      - name: Integrate KernelSU into kernel source (manual, no setup.sh)
+      - name: Patch Kernel (simulate main.yml packaging)
+        run: |
+          cp $Setup_Dir/setup.sh $KernelSU_Dir/kernel/setup.sh
+          cd $KernelSU_Dir
+          tar czf "/tmp/KernelSU_patched.tar.gz" .[!.]* *
+      - name: Integrate KernelSU into kernel source (emulate main.yml extraction)
         run: |
           cd $GITHUB_WORKSPACE
-
-          # === 彻底清理旧 KernelSU 痕迹 ===
-          echo "Cleaning up old KernelSU traces..."
-          rm -rf drivers/kernelsu
-          rm -rf drivers/staging/kernelsu
-          rm -f  drivers/staging/kernelsu   # 删除可能的符号链接
-          rm -rf KernelSU
-
-          # 清理 drivers/Kconfig 和 drivers/Makefile 中的旧引用
-          sed -i '/kernelsu\/Kconfig/d' drivers/Kconfig 2>/dev/null || true
-          sed -i '/kernelsu/d' drivers/Makefile 2>/dev/null || true
-          sed -i '/kernelsu\/Kconfig/d' drivers/staging/Kconfig 2>/dev/null || true
-          sed -i '/kernelsu/d' drivers/staging/Makefile 2>/dev/null || true
-
-          # === 将 KernelSU 内核模块源码复制到标准位置 ===
-          mkdir -p drivers/staging/kernelsu
-          cp -r $KernelSU_Dir/kernel/* drivers/staging/kernelsu/
-
-          # === 记录版本信息（与 main.yml 一致） ===
-          cd $KernelSU_Dir
+          rm -rf KernelSU drivers/staging/kernelsu
+          mkdir -p KernelSU
+          tar -xzf /tmp/KernelSU_patched.tar.gz -C KernelSU
+          cd KernelSU
+          echo "kernelsu_id=$(git show -s --date=short --format="%h")" >> $GITHUB_ENV
           git_count=$(git rev-list --count HEAD)
           kernelsu_version=$(expr 10000 + $git_count + 200)
           echo "kernelsu_version=$kernelsu_version" >> $GITHUB_ENV
           cd $GITHUB_WORKSPACE
-
-          # === 将 KernelSU 添加到内核配置系统 ===
-          # 在 drivers/staging/Kconfig 末尾添加引用（避免重复）
-          if ! grep -q "kernelsu/Kconfig" drivers/staging/Kconfig; then
-            echo 'source "drivers/staging/kernelsu/Kconfig"' >> drivers/staging/Kconfig
+          # 执行 KernelSU 官方集成脚本
+          sh KernelSU/kernel/setup.sh || true
+          # 容错处理：如果 setup.sh 未能正确创建 Makefile，则手动复制
+          if [ ! -f drivers/staging/kernelsu/Makefile ]; then
+            echo "KernelSU setup.sh failed to create drivers/staging/kernelsu, fixing manually..."
+            mkdir -p drivers/staging/kernelsu
+            cp -r KernelSU/kernel/* drivers/staging/kernelsu/
+            # 确保 Kconfig 被引用
+            if ! grep -q "kernelsu" drivers/staging/Kconfig; then
+              echo 'source "drivers/staging/kernelsu/Kconfig"' >> drivers/staging/Kconfig
+            fi
+            if ! grep -q "kernelsu" drivers/staging/Makefile; then
+              echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/staging/Makefile
+            fi
           fi
-
-          # 在 drivers/staging/Makefile 中添加条目
-          if ! grep -q "kernelsu" drivers/staging/Makefile; then
-            echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/staging/Makefile
-          fi
-
-          # === 确保 defconfig 中启用了 KernelSU ===
-          DEFCONFIG="arch/arm64/configs/raphael_defconfig"
-          if ! grep -q "CONFIG_KSU=y" $DEFCONFIG; then
-            echo "CONFIG_KSU=y" >> $DEFCONFIG
-            echo "CONFIG_KSU_KPROBE_HOOKS=y" >> $DEFCONFIG
-          fi
-
-          echo "KernelSU manually integrated successfully."
         shell: bash
 
       # ================= 添加 rtl8188eus 驱动（保持原地址不变）=================
@@ -111,13 +92,11 @@ jobs:
             exit 1
           fi
           rm -rf rtl8188eus-repo
-
       - name: Setup QEMU user mode
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user-static binfmt-support
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -139,12 +118,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
           ccache --show-stats
-
       - name: Deploy Clang (if cache miss)
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
-
       - name: Save Clang cache
         if: steps.restore-clang.outputs.cache-hit != 'true'
         id: cache-clang-save
@@ -242,7 +219,7 @@ jobs:
           echo "# CONFIG_BLK_DEV_THROTTLING is not set" >> $DEFCONFIG
           echo "# CONFIG_CFQ_GROUP_IOSCHED is not set" >> $DEFCONFIG
           
-          # 修复设备树语法错误（改为 raphael-sm8150.dtsi）
+          # 修复设备树语法错误（按用户要求改为 raphael-sm8150.dtsi）
           sed -i '/raphael-sm8150.dtsi/d' arch/arm64/boot/dts/qcom/Makefile
           sed -i '/qvr/d' arch/arm64/boot/dts/qcom/Makefile
           sed -i '/interposer/d' arch/arm64/boot/dts/qcom/Makefile
@@ -390,13 +367,11 @@ jobs:
               fi
               echo \"USB/IP user-space tools build complete.\"
             "
-
       - name: Package USB/IP artifacts
         run: |
           cd usbip-out
           tar czf ../usbip-arm64-bundle.tar.gz .
           cd ..
-
       - name: Upload USB/IP bundle
         uses: actions/upload-artifact@v4
         with:
@@ -423,7 +398,6 @@ jobs:
           cd $GITHUB_WORKSPACE/rtl8188-module
           tar czf ../rtl8188-module.tar.gz rtl8188.ko
           cd $GITHUB_WORKSPACE
-
       - name: Upload rtl8188 Module Artifact
         uses: actions/upload-artifact@v4
         with:

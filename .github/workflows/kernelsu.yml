@@ -306,10 +306,19 @@ jobs:
               mv fs/btrfs fs/btrfs_disabled_backup
           fi
 
-          # 开始编译（配置已完成，直接 make）
+          # 开始编译
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo) O=out
           ccache --show-stats
           ccache --show-config
+
+      - name: Check rtl8188 compilation status
+        run: |
+          echo "=== Checking CONFIG_RTL8188EU in .config ==="
+          grep "CONFIG_RTL8188EU" out/.config || echo "CONFIG_RTL8188EU not set"
+          echo "=== Searching for rtl8188 related .o files ==="
+          find out -name "*8188*.o" | head -10
+          echo "=== Listing all .ko modules built ==="
+          find out -name "*.ko" | head -20
 
       - name: Build USB/IP kernel modules
         run: |
@@ -406,19 +415,16 @@ jobs:
       - name: Extract rtl8188.ko module
         run: |
           mkdir -p $GITHUB_WORKSPACE/rtl8188-module
-          RTL_MODULE=$(find out -name "rtl8188.ko" -type f | head -1)
+          # 宽松匹配 rtl8188 相关模块（8188eu, rtl8188, r8188eu 等）
+          RTL_MODULE=$(find out -name "*.ko" -type f | grep -iE "8188|rtl8188" | head -1)
           if [ -n "$RTL_MODULE" ]; then
             cp "$RTL_MODULE" $GITHUB_WORKSPACE/rtl8188-module/rtl8188.ko
-            echo "rtl8188.ko copied from $RTL_MODULE"
+            echo "Module copied: $RTL_MODULE"
           else
-            RTL_ALT=$(find out -name "*8188*.ko" -type f | head -1)
-            if [ -n "$RTL_ALT" ]; then
-              cp "$RTL_ALT" $GITHUB_WORKSPACE/rtl8188-module/rtl8188.ko
-              echo "Copied alternative module as rtl8188.ko from $RTL_ALT"
-            else
-              echo "Error: No rtl8188 related module found"
-              exit 1
-            fi
+            echo "Available .ko modules in out:"
+            find out -name "*.ko" | head -30
+            echo "Error: No rtl8188 related module found"
+            exit 1
           fi
           cd $GITHUB_WORKSPACE/rtl8188-module
           tar czf ../rtl8188-module.tar.gz rtl8188.ko

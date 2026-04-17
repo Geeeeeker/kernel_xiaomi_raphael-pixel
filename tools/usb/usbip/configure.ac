@@ -44,11 +44,23 @@ AC_FUNC_REALLOC
 AC_CHECK_FUNCS([memset mkdir regcomp socket strchr strerror strstr dnl
 		strtoul])
 
-AC_CHECK_HEADER([libudev.h],
-		[AC_CHECK_LIB([udev], [udev_new],
-			      [LIBS="$LIBS -ludev"],
-			      [AC_MSG_ERROR([Missing udev library!])])],
-		[AC_MSG_ERROR([Missing /usr/include/libudev.h])])
+# ----------------------------------------------------------------------
+# Option to disable libudev (useful for Android cross-compilation)
+AC_ARG_WITH([libudev],
+    [AS_HELP_STRING([--without-libudev], [Disable libudev support (e.g., for Android)])],
+    [with_libudev=$withval],
+    [with_libudev=yes])
+
+if test "x$with_libudev" != "xno"; then
+    AC_CHECK_HEADER([libudev.h],
+        [AC_CHECK_LIB([udev], [udev_new],
+            [LIBS="$LIBS -ludev"],
+            [AC_MSG_ERROR([Missing udev library!])])],
+        [AC_MSG_ERROR([Missing /usr/include/libudev.h])])
+else
+    AC_DEFINE([WITHOUT_LIBUDEV], [1], [Define if building without libudev])
+fi
+# ----------------------------------------------------------------------
 
 # Checks for libwrap library.
 AC_MSG_CHECKING([whether to use the libwrap (TCP wrappers) library])

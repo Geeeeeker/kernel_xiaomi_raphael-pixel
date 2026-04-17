@@ -299,12 +299,14 @@ jobs:
           grep "^CONFIG_BTRFS_FS" .config || echo "Btrfs successfully disabled."
           cd ..
 
-          # === 终极手段：直接移除 btrfs 源码目录，防止其参与编译 ===
-          echo "Renaming fs/btrfs to prevent compilation..."
+          # === 彻底绕过 Btrfs 编译（修复 Kconfig 引用并移动目录） ===
+          echo "Removing btrfs from fs/Kconfig and moving directory..."
+          sed -i '/source "fs\/btrfs\/Kconfig"/d' fs/Kconfig
           if [ -d fs/btrfs ]; then
               mv fs/btrfs fs/btrfs_disabled_backup
           fi
 
+          # 开始编译（配置已完成，直接 make）
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo) O=out
           ccache --show-stats
           ccache --show-config

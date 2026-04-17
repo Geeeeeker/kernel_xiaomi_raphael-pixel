@@ -41,14 +41,27 @@ jobs:
 
       - name: Remove Old KernelSU Files
         run: |
-          rm -rf drivers/staging/kernelsu && rm -rf .git/module/*
-          
+          rm -rf drivers/staging/kernelsu drivers/staging/kernelsu_bak
+          rm -rf .git/module/*
+
       - name: Integrate KernelSU 
         run: |
-          # 使用官方KernelSU仓库
+          # 使用官方 KernelSU v0.9.5（适用于非 GKI 内核）
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
-          # 如果你想继续用SoDebug的fork，可以尝试：
-          # curl -LSs "https://raw.githubusercontent.com/SoDebug/KernelSU/SOVIET-ANDROID_dev/kernel/setup.sh" | bash -s main
+
+      - name: Fix KernelSU Kconfig Path
+        run: |
+          # 如果 Kconfig 文件在 drivers/staging/kernelsu/ 根目录，则创建软链接让原引用路径生效
+          if [ -f "drivers/staging/kernelsu/Kconfig" ] && [ ! -d "drivers/staging/kernelsu/kernel" ]; then
+            mkdir -p drivers/staging/kernelsu/kernel
+            ln -sf ../Kconfig drivers/staging/kernelsu/kernel/Kconfig
+          fi
+          # 如果 drivers/staging/Kconfig 中引用路径错误，直接修正它
+          if grep -q "source \"drivers/staging/kernelsu/kernel/Kconfig\"" drivers/staging/Kconfig; then
+            if [ ! -f "drivers/staging/kernelsu/kernel/Kconfig" ] && [ -f "drivers/staging/kernelsu/Kconfig" ]; then
+              sed -i 's|source "drivers/staging/kernelsu/kernel/Kconfig"|source "drivers/staging/kernelsu/Kconfig"|g' drivers/staging/Kconfig
+            fi
+          fi
 
       - name: Compiling Kernel
         run: |

@@ -22,15 +22,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 2. 集成 KernelSU（使用 SoDebug/KernelSU 仓库）
-      - name: Integrate KernelSU
-        run: |
-          export GIT_ASKPASS=echo
-          git clone --depth=1 https://github.com/SoDebug/KernelSU.git KernelSU
-          cp -r KernelSU/kernel drivers/kernelsu
-          echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
-          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-
       # 3. 添加 rtl8188eus 无线网卡驱动
       - name: Add rtl8188eus WiFi driver
         run: |

@@ -22,6 +22,14 @@ jobs:
         with:
           fetch-depth: 1
 
+      # 2. 集成 KernelSU（使用 SoDebug/KernelSU 仓库）
+      - name: Integrate KernelSU
+        run: |
+          export GIT_ASKPASS=echo
+          git clone --depth=1 https://github.com/SoDebug/KernelSU.git KernelSU
+          cp -r KernelSU/kernel drivers/kernelsu
+          echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
+          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
       # 3. 添加 rtl8188eus 无线网卡驱动
       - name: Add rtl8188eus WiFi driver
         run: |
@@ -36,14 +44,12 @@ jobs:
             exit 1
           fi
           rm -rf rtl8188eus-repo
-
       # 4. 设置 QEMU 用户态支持（用于运行 arm64 Docker 容器）
       - name: 设置 QEMU 用户态支持
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user-static binfmt-support
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
       # 5. 设置 ccache
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -68,13 +74,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
           ccache --show-stats
-
       # 8. 部署 clang 工具链（如果缓存未命中）
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
-
       # 9. 保存 clang 工具链缓存
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
@@ -128,7 +132,6 @@ jobs:
           echo "CONFIG_USB_SERIAL_FTDI_SIO=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_CP210X=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
-
           # ------------------ KernelSU 手动 hook 配置 ------------------
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KSU_MANUAL_HOOK=y" >> $DEFCONFIG   # 启用非 kprobe 模式
@@ -150,7 +153,6 @@ jobs:
             \    ksu_handle_execveat(&fd, &filename, &argv, &env, &flags);\
             \    #endif' fs/exec.c
           fi
-
           # 在 fs/open.c 中插入 hook（用于监控 openat）
           if grep -q "ksu_handle_openat" fs/open.c; then
             echo "Manual hook already applied to open.c, skipping."
@@ -162,7 +164,6 @@ jobs:
             \    ksu_handle_openat(&dfd, &filename, &flags, &mode);\
             \    #endif' fs/open.c
           fi
-
           # 如果您的内核使用 openat2 或 faccessat 等，可能需要额外补丁，但基础监控以上两个已足够。
         shell: bash
 
@@ -243,7 +244,6 @@ jobs:
               fi
               echo \"USB/IP user-space tools build and collection complete.\"
             "
-
       # 14. 打包 AnyKernel3 内核安装包
       - name: Repack Kernel Artifacts
         run: |

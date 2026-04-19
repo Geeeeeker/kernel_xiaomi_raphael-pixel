@@ -221,7 +221,7 @@ out_unlock:
 	 * set_cpus_allowed_ptr() can sleep, use raw_smp_processor_id() to get
 	 * current CPU and bypass preemption checks.
 	 */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0)
 	cpumask_copy(&old_mask, current->cpus_ptr);
 #else
 	cpumask_copy(&old_mask, &current->cpus_allowed);
@@ -261,6 +261,14 @@ do_stop_machine:
 out_flush:
 	smp_mb();
 	reset_avc_cache();
+#ifdef CONFIG_KSU_SUSFS
+    // Allow umount in zygote process without installing zygisk
+    //ksu_allow(db, "zygote", "labeledfs", "filesystem", "unmount");
+    susfs_set_priv_app_sid();
+    susfs_set_init_sid();
+    susfs_set_ksu_sid();
+    susfs_set_zygote_sid();
+#endif // #ifdef CONFIG_KSU_SUSFS
 #endif
 }
 
@@ -745,7 +753,7 @@ int handle_sepolicy(void __user *user_data, u64 data_len)
 	 * set_cpus_allowed_ptr() can sleep, use raw_smp_processor_id() to get
 	 * current CPU and bypass preemption checks.
 	 */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 14, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0)
 	cpumask_copy(&old_mask, current->cpus_ptr);
 #else
 	cpumask_copy(&old_mask, &current->cpus_allowed);

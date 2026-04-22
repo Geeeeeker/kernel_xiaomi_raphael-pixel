@@ -133,12 +133,17 @@ jobs:
           export KBUILD_BUILD_HOST="github-runner"
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
 
           # 1. 生成 .config 文件
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
 
           # 2. 准备编译工具和必要的头文件（单线程避免竞态）
-          make O=out ARCH=arm64 -j1 prepare
+          make O=out ARCH=arm64 \
+            CC="ccache clang" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            -j1 prepare
 
           # 3. 显式构建 security/selinux 以确保 flask.h 生成
           make O=out ARCH=arm64 \

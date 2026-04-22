@@ -138,21 +138,34 @@ jobs:
           # 1. 生成 .config 文件
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
 
-          # 2. 构建主机工具 (包括 genheaders 等)
-          make O=out ARCH=arm64 \
-            CC="ccache clang" \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            -j1 scripts
+          # 2. 补全缺失的 classmap.h（如果内核源码中缺失）
+          if [ ! -f security/selinux/include/classmap.h ]; then
+            echo "classmap.h not found, downloading..."
+            mkdir -p security/selinux/include
+            curl -LSs https://raw.githubusercontent.com/torvalds/linux/v4.14/security/selinux/include/classmap.h -o security/selinux/include/classmap.h
+          fi
 
-          # 3. 准备其余构建环境
+          # 3. 构建主机工具（包括 genheaders）
+          make O=out ARCH=arm64 -j1 scripts
+
+          # 4. 手动生成 flask.h 和 av_permissions.h
+          mkdir -p out/security/selinux/include
+          scripts/selinux/genheaders/genheaders \
+            security/selinux/include/classmap.h \
+            security/selinux/include/initial_sid_to_string.h \
+            > out/security/selinux/include/flask.h
+          scripts/selinux/genheaders/genheaders \
+            -t security/selinux/include/classmap.h \
+            > out/security/selinux/include/av_permissions.h
+
+          # 5. 准备构建环境
           make O=out ARCH=arm64 \
             CC="ccache clang" \
             LLVM=1 \
             LLVM_IAS=1 \
             -j1 prepare
 
-          # 4. 完整编译内核（多线程加速）
+          # 6. 完整编译内核
           make O=out ARCH=arm64 \
             CC="ccache clang" \
             LLVM=1 \

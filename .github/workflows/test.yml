@@ -142,7 +142,7 @@ jobs:
             curl -LSs https://raw.githubusercontent.com/torvalds/linux/v4.14/security/selinux/include/classmap.h -o security/selinux/include/classmap.h
           fi
 
-          # 3. 构建主机工具（取消交叉编译器，确保使用宿主机gcc）
+          # 3. 构建主机工具（取消交叉编译器，强制使用宿主机 gcc）
           unset CROSS_COMPILE CROSS_COMPILE_ARM32 CROSS_COMPILE_COMPAT
           make O=out ARCH=arm64 -j1 scripts
 
@@ -156,13 +156,11 @@ jobs:
             -t security/selinux/include/classmap.h \
             > out/security/selinux/include/av_permissions.h
 
-          # 5. 重新设置交叉编译器环境
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-
-          # 6. 完整编译内核（跳过单独的 prepare，直接 all）
+          # 5. 完整编译内核（将交叉编译变量作为 make 参数显式传递）
           make O=out ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
             CC="ccache clang" \
             LLVM=1 \
             LLVM_IAS=1 \

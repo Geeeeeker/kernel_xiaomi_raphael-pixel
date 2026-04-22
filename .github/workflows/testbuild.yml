@@ -177,7 +177,7 @@ jobs:
             --memory=6g \
             -v ${{ github.workspace }}:/workspace \
             -v ${{ github.workspace }}/usbip-out:/output \
-            -w /workspace \
+            -w /workspace/kernel \
             arm64v8/ubuntu:22.04 \
             bash -c "
               set -e
@@ -197,9 +197,8 @@ jobs:
                 patchelf
               cd tools/usb/usbip
               ./autogen.sh
-              ./configure CFLAGS=\"-O0 -Wno-error\" --prefix=/usr
-              make CFLAGS=\"-O0 -Wno-error\" -j1
-              # 复制二进制和库
+              ./configure CFLAGS=\"-Wno-error -Wno-error=stringop-truncation\" --with-tcp-wrappers=no
+              make -j1
               cp src/.libs/usbip /output/bin/
               cp src/.libs/usbipd /output/bin/
               cp libsrc/.libs/libusbip.so.0* /output/libs/
@@ -217,7 +216,10 @@ jobs:
                 fi
               done
               for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
-                libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1 || true)
+                libpath=\$(ldconfig -p | grep \"\$lib (\" | head -1 | awk '{print \$NF}' || true)
+                if [ -z \"\$libpath\" ]; then
+                  libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1 || true)
+                fi
                 if [ -n \"\$libpath\" ]; then
                   cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
                   for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
@@ -225,8 +227,9 @@ jobs:
                   done
                 fi
               done
-              if [ -f \"/lib/ld-linux-aarch64.so.1\" ]; then
-                cp -P \"/lib/ld-linux-aarch64.so.1\" libs/
+              ld_linux=\"/lib/ld-linux-aarch64.so.1\"
+              if [ -f \"\$ld_linux\" ]; then
+                cp -P \"\$ld_linux\" libs/
               fi
             "
 

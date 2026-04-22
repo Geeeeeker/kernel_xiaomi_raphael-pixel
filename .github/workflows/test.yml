@@ -134,7 +134,17 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
-          # 先单独编译 security/selinux，生成 flask.h 等头文件，避免并行编译导致的缺失问题
+          # 第一步：生成 .config（使用指定的 defconfig）
+          make -j$(nproc) \
+            CC="ccache clang" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            O=out \
+            KCFLAGS="-Wno-unknown-warning-option" \
+            ${{ env.DEFCONFIG }}
+
+          # 第二步：单独编译 security/selinux，确保 flask.h 等头文件生成
           make -j1 \
             CC="ccache clang" \
             ARCH=arm64 \
@@ -144,7 +154,7 @@ jobs:
             KCFLAGS="-Wno-unknown-warning-option" \
             security/selinux/
 
-          # 再进行完整的内核编译
+          # 第三步：完整构建内核
           make -j$(nproc) \
             CC="ccache clang" \
             ARCH=arm64 \
@@ -152,7 +162,7 @@ jobs:
             LLVM_IAS=1 \
             O=out \
             KCFLAGS="-Wno-unknown-warning-option" \
-            ${{ env.DEFCONFIG }} all
+            all
 
       # ========== USB/IP 支持 ==========
       - name: 设置 QEMU 用户态支持 (用于 arm64 容器)

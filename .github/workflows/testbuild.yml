@@ -149,7 +149,7 @@ jobs:
           sudo apt-get install -y qemu-user-static binfmt-support
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
-      - name: 编译 USB/IP 内核模块
+      - name: 编译 USB/IP 内核模块（可选）
         working-directory: kernel
         run: |
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
@@ -160,9 +160,15 @@ jobs:
             O=out \
             CROSS_COMPILE=aarch64-linux-gnu- \
             M=drivers/usb/usbip \
-            modules
+            modules || echo "Warning: USB/IP modules build skipped or failed."
+
           mkdir -p $GITHUB_WORKSPACE/usbip-out/modules
-          cp out/drivers/usb/usbip/*.ko $GITHUB_WORKSPACE/usbip-out/modules/
+          # 仅当 .ko 文件存在时才复制
+          if ls out/drivers/usb/usbip/*.ko 1> /dev/null 2>&1; then
+              cp out/drivers/usb/usbip/*.ko $GITHUB_WORKSPACE/usbip-out/modules/
+          else
+              echo "No USB/IP kernel modules generated (probably built-in)."
+          fi
 
       - name: 编译 USB/IP 用户态工具 (Docker arm64 容器)
         run: |

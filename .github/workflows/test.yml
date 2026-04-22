@@ -11,7 +11,7 @@ on:
 
 env:
   DEVICE: raphael
-  DEFCONFIG: raphael_defconfig               # 直接写死，避免自引用
+  DEFCONFIG: raphael_defconfig
   ANDROID_VERSION: "16.0"
   CLANG_VERSION: r547379
   CLANG_TARBALL_URL: https://github.com/Geeeeeker/boot/releases/download/clang-prebuilts-20260319-031015/clang-r547379.tar.gz

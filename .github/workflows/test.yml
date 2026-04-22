@@ -152,9 +152,12 @@ jobs:
             curl -LSs https://raw.githubusercontent.com/torvalds/linux/v4.14/security/selinux/include/classmap.h -o security/selinux/include/classmap.h
           fi
 
-          # 5. 构建主机工具（取消交叉编译器，强制使用宿主机 gcc）
+          # 5. 构建主机工具（强制使用纯净的宿主机 gcc，并清除 HOSTCFLAGS）
           unset CROSS_COMPILE CROSS_COMPILE_ARM32 CROSS_COMPILE_COMPAT
-          make O=out ARCH=arm64 -j1 scripts
+          make O=out ARCH=arm64 \
+            HOSTCC=gcc \
+            HOSTCFLAGS="-O2 -Wall" \
+            -j1 scripts
 
           # 6. 手动生成 flask.h 和 av_permissions.h
           mkdir -p out/security/selinux/include

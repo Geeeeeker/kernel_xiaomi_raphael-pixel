@@ -38,6 +38,7 @@ CONFIG_TRUSTY=y
 # Frame-Warn (adjust value)
 CONFIG_FRAME_WARN=4096
 # ====== 补充 ======
+CONFIG_CFS_BANDWIDTH=y
 # CONFIG_FTRACE is not set
 # CONFIG_TRACEPOINTS is not set
 # ====== docker补充 ======

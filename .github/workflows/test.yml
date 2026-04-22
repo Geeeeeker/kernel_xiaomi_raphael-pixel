@@ -156,7 +156,7 @@ jobs:
             -t security/selinux/include/classmap.h \
             > out/security/selinux/include/av_permissions.h
 
-          # 5. 完整编译内核（将交叉编译变量作为 make 参数显式传递）
+          # 5. 完整编译内核（禁用 32 位 vDSO，绕过 CROSS_COMPILE_COMPAT 检查）
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
@@ -165,6 +165,7 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             KCFLAGS="-Wno-unknown-warning-option" \
+            VDSO_COMPAT=0 \
             -j$(nproc) all
       # ========== USB/IP 支持 ==========
       - name: 设置 QEMU 用户态支持 (用于 arm64 容器)

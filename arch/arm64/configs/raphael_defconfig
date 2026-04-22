@@ -12,42 +12,6 @@ CONFIG_KALLSYMS_ALL=y
 CONFIG_DEBUG_KERNEL=y
 CONFIG_KSU=y
 CONFIG_KPM=y
-# Platform
-CONFIG_MACH_XIAOMI_SM8150=y
-
-# Pstore-Xiaomi
-CONFIG_CMDLINE="ramoops_memreserve=4M cgroup_disable=pressure"
-CONFIG_CMDLINE_EXTEND=y
-
-# Fingerprint (FPC)
-CONFIG_FINGERPRINT_FPC_TEE=y
-
-# Haptics (AW8697)
-CONFIG_INPUT_AW8697_XM_HAPTIC=y
-
-# IR
-CONFIG_IR_SPI=y
-CONFIG_LIRC=y
-CONFIG_RC_CORE=y
-CONFIG_RC_DECODERS=y
-CONFIG_MEDIA_RC_SUPPORT=y
-CONFIG_RC_DEVICES=y
-
-# Proximity
-
-
-# Power (explicitly disable unused chargers)
-# CONFIG_SMB1355_SLAVE_CHARGER is not set
-# CONFIG_SMB1390_CHARGE_PUMP_PSY is not set
-
-# Simtray
-CONFIG_SIMTRAY_STATUS=y
-
-# Speaker ID
-CONFIG_MFD_SPK_ID=y
-
-# TEE
-CONFIG_TRUSTY=y
 
 # Frame-Warn (adjust value)
 CONFIG_FRAME_WARN=4096

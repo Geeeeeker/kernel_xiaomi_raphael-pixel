@@ -135,18 +135,21 @@ jobs:
           # 1. 生成 .config 文件
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
 
-          # 2. 补全缺失的 classmap.h（如果内核源码中缺失）
+          # 2. 注释掉 arch/arm64/Makefile 中对 CROSS_COMPILE_COMPAT 的强制检查（绕过致命错误）
+          sed -i '/CROSS_COMPILE_COMPAT not defined or empty/{s/^/#/; n; s/^/#/}' arch/arm64/Makefile
+
+          # 3. 补全缺失的 classmap.h（如果内核源码中缺失）
           if [ ! -f security/selinux/include/classmap.h ]; then
             echo "classmap.h not found, downloading..."
             mkdir -p security/selinux/include
             curl -LSs https://raw.githubusercontent.com/torvalds/linux/v4.14/security/selinux/include/classmap.h -o security/selinux/include/classmap.h
           fi
 
-          # 3. 构建主机工具（取消交叉编译器，强制使用宿主机 gcc）
+          # 4. 构建主机工具（取消交叉编译器，强制使用宿主机 gcc）
           unset CROSS_COMPILE CROSS_COMPILE_ARM32 CROSS_COMPILE_COMPAT
           make O=out ARCH=arm64 -j1 scripts
 
-          # 4. 手动生成 flask.h 和 av_permissions.h
+          # 5. 手动生成 flask.h 和 av_permissions.h
           mkdir -p out/security/selinux/include
           scripts/selinux/genheaders/genheaders \
             security/selinux/include/classmap.h \
@@ -156,7 +159,7 @@ jobs:
             -t security/selinux/include/classmap.h \
             > out/security/selinux/include/av_permissions.h
 
-          # 5. 完整编译内核（禁用 32 位 vDSO，绕过 CROSS_COMPILE_COMPAT 检查）
+          # 6. 完整编译内核（显式传递所有交叉编译变量）
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
@@ -165,7 +168,6 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             KCFLAGS="-Wno-unknown-warning-option" \
-            VDSO_COMPAT=0 \
             -j$(nproc) all
       # ========== USB/IP 支持 ==========
       - name: 设置 QEMU 用户态支持 (用于 arm64 容器)

@@ -12,7 +12,7 @@ on:
 env:
   DEVICE: raphael
   DEFCONFIG: raphael_defconfig
-  ANDROID_VERSION: "16.0"                 # 用于 AnyKernel3 命名
+  ANDROID_VERSION: "16.0"
   CLANG_VERSION: r547379
   CLANG_TARBALL_URL: https://github.com/Geeeeeker/boot/releases/download/clang-prebuilts-20260319-031015/clang-r547379.tar.gz
   MAGISK_CANARY_URL: https://github.com/topjohnwu/Magisk/releases/download/v30.7/Magisk-v30.7.apk
@@ -22,7 +22,7 @@ env:
 
 jobs:
   build:
-    name: 编译内核 (${{ env.DEVICE }})
+    name: 编译内核 (raphael)   # 修正：直接使用静态设备名
     permissions:
       contents: write
     runs-on: ubuntu-latest

@@ -22,7 +22,7 @@ env:
 
 jobs:
   build:
-    name: 编译内核 (${{ env.DEVICE }})
+    name: 编译内核 (raphael)
     permissions: { contents: write }
     runs-on: ubuntu-latest
     steps:

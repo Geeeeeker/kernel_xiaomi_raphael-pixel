@@ -138,22 +138,28 @@ jobs:
           # 1. 生成 .config 文件
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
 
-          # 2. 准备编译工具和必要的头文件（单线程避免竞态）
+          # 2. 准备基础构建脚本和工具
           make O=out ARCH=arm64 \
             CC="ccache clang" \
             LLVM=1 \
             LLVM_IAS=1 \
-            -j1 prepare
+            -j1 scripts_basic
 
-          # 3. 显式构建 security/selinux 以确保 flask.h 生成
+          # 3. 显式生成 flask.h（SELinux 核心头文件）
           make O=out ARCH=arm64 \
             CC="ccache clang" \
             LLVM=1 \
             LLVM_IAS=1 \
-            KCFLAGS="-Wno-unknown-warning-option" \
+            -j1 security/selinux/flask.h
+
+          # 4. 继续构建整个 security/selinux 以确保其他依赖（如 av_permissions.h）也生成
+          make O=out ARCH=arm64 \
+            CC="ccache clang" \
+            LLVM=1 \
+            LLVM_IAS=1 \
             -j1 security/selinux/
 
-          # 4. 完整编译内核
+          # 5. 完整编译内核（多线程加速）
           make O=out ARCH=arm64 \
             CC="ccache clang" \
             LLVM=1 \

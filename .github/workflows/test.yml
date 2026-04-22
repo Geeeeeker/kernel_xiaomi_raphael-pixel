@@ -146,31 +146,21 @@ jobs:
             KCFLAGS="-Wno-unknown-warning-option" \
             ${{ env.DEFCONFIG }} all
 
-      # ------------------------------------------------------------
-      # 收集 USB/IP 内核模块
-      # ------------------------------------------------------------
-      - name: 收集 USB/IP 内核模块
-        run: |
-          mkdir -p usbip-out/modules
-          cp kernel/out/drivers/usb/usbip/*.ko usbip-out/modules/ || true
-
-      # ------------------------------------------------------------
-      # 编译 USB/IP 用户态工具 (arm64 Docker 容器)
-      # ------------------------------------------------------------
-      - name: 设置 QEMU 用户态支持
+      - name: 设置 QEMU 用户态支持 (USB/IP 工具编译)
+        if: github.event.inputs.feature_usbip == 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
+          sudo apt-get install -y qemu-user-static
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-
       - name: 编译 USB/IP 用户态工具 (Docker 容器)
+        if: github.event.inputs.feature_usbip == 'true'
         run: |
           mkdir -p usbip-out/{bin,libs}
           docker run --rm --platform linux/arm64 \
-            --memory=4g \
+            --memory=7g \
             -v ${{ github.workspace }}:/workspace \
             -v ${{ github.workspace }}/usbip-out:/output \
-            -w /workspace \
+            -w /workspace/kernel \
             arm64v8/ubuntu:22.04 \
             bash -c "
               set -e
@@ -182,16 +172,26 @@ jobs:
                 autoconf \
                 libtool \
                 pkg-config \
-                libudev-dev \
-                libssl-dev \
+                libudev-dev:arm64 \
+                libssl-dev:arm64 \
                 flex \
                 bison \
+                bc \
+                libelf-dev \
                 file \
                 patchelf
+              export ARCH=arm64
+              export CROSS_COMPILE=aarch64-linux-gnu-
+              export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
               cd tools/usb/usbip
               ./autogen.sh
-              ./configure CFLAGS=\"-O0 -Wno-error\" --prefix=/usr
-              make CFLAGS=\"-O0 -Wno-error\" -j1
+              ./configure \
+                CFLAGS=\"-fPIC -Wno-error -Wno-error=stringop-truncation \
+                         -I/workspace/kernel/out/include \
+                         -I/workspace/kernel/out/arch/arm64/include/generated \
+                         -I/workspace/kernel/arch/arm64/include\" \
+                --with-tcp-wrappers=no
+              make -j1
               cp src/.libs/usbip /output/bin/
               cp src/.libs/usbipd /output/bin/
               cp libsrc/.libs/libusbip.so.0* /output/libs/
@@ -209,7 +209,10 @@ jobs:
                 fi
               done
               for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
-                libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1 || true)
+                libpath=\$(ldconfig -p | grep \"\$lib (\" | head -1 | awk '{print \$NF}' || true)
+                if [ -z \"\$libpath\" ]; then
+                  libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1 || true)
+                fi
                 if [ -n \"\$libpath\" ]; then
                   cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
                   for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
@@ -222,50 +225,42 @@ jobs:
                 cp -P \"\$ld_linux\" libs/
               fi
             "
-
       - name: 打包 USB/IP 产物
+        if: github.event.inputs.feature_usbip == 'true'
         run: |
           cd usbip-out
           tar czf ../usbip-arm64-bundle.tar.gz .
           cd ..
-
-      - name: 上传 USB/IP 捆绑包 (Artifact)
+      - name: 上传 USB/IP 捆绑包
+        if: github.event.inputs.feature_usbip == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: usbip-arm64-bundle
           path: usbip-arm64-bundle.tar.gz
+      # ========== USB/IP 结束 ==========
 
-      # ------------------------------------------------------------
-      # 下载管理器 APK (KernelSU / APatch / Magisk)
-      # ------------------------------------------------------------
       - name: 下载管理器 APK
         run: |
           mkdir -p apk-output
-          wget -O apk-output/KernelSU-Manager.apk \
-            https://github.com/tiann/KernelSU/releases/download/${{ env.KERNELSU_VERSION }}/KernelSU_v${{ env.KERNELSU_VERSION }}_11872-release.apk
-          wget -O apk-output/APatch-Manager.apk \
-            "https://github.com/bmax121/APatch/releases/download/${{ env.APATCH_VERSION }}/APatch_${{ env.APATCH_TAG }}.apk"
-          wget -O apk-output/Magisk-Canary.apk "${{ env.MAGISK_CANARY_URL }}"
+          wget -O apk-output/Magisk.apk "https://github.com/topjohnwu/Magisk/releases/download/v30.7/Magisk-v30.7.apk" || true
+        continue-on-error: true
 
-      - name: 上传管理器 APK (Artifact)
+      - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
           name: Manager-APKs
           path: apk-output/*.apk
 
-      # ------------------------------------------------------------
-      # 打包 AnyKernel3 和 boot.img
-      # ------------------------------------------------------------
-      - name: 打包 AnyKernel3 刷机包
+      - name: 打包 AnyKernel3
         run: |
-          git clone https://github.com/osm0sis/AnyKernel3 --depth=1 ak3
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 ak3
           cp kernel/out/arch/arm64/boot/Image.gz-dtb ak3/
           cp kernel/out/arch/arm64/boot/dtbo.img ak3/ || true
           cd ak3
           cat >anykernel.sh <<EOF
           properties() { '
-          kernel.string=Kernel for ${{ env.DEVICE }} with KSU Next + SUSFS + LXC/Docker
-          device.name1=${{ env.DEVICE }}
+          kernel.string=KernelSU-next + SUSFS for ${{ matrix.device }}
+          device.name1=${{ matrix.device }}
           do.devicecheck=1
           '; }
           ramdisk_compression=auto
@@ -276,75 +271,78 @@ jobs:
           split_boot
           flash_boot
           EOF
-          DATE=$(date +%Y%m%d)
-          ZIP_NAME="anykernel3-${{ env.DEVICE }}-${{ env.ANDROID_VERSION }}-${DATE}.zip"
-          zip -qr9 "${ZIP_NAME}" * -x .git .github README.md *placeholder
-          mv "${ZIP_NAME}" ../
-
+          ZIP_NAME="AnyKernel3-${{ matrix.device }}-${{ env.ANDROID_VERSION }}-arm64.zip"
+          7z a -tzip "../${ZIP_NAME}" * -x!.git -x!.github -x!README.md -x!*placeholder
+          echo "AK3_ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
       - name: 打包 boot.img
         run: |
-          git clone https://android.googlesource.com/platform/system/tools/mkbootimg --depth=1 mkbootimg
+          git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg mkbootimg
           cp kernel/out/arch/arm64/boot/Image.gz-dtb mkbootimg/
           cd mkbootimg
-          # 从 LineageOS 获取官方 boot.img 作为打包模板
-          boot_url=$(curl -LSs https://download.lineageos.org/api/v2/devices/${{ env.DEVICE }}/builds | jq -r '.[0].files[1].url')
-          curl -LSs $boot_url -o boot.img
+          # 直接使用您提供的 LineageOS boot.img
+          BOOT_IMG_URL="https://github.com/Geeeeeker/boot/releases/download/extracted-roms-20260322-062443/LineageOS_boot.img"
+          curl -LSs "$BOOT_IMG_URL" -o boot.img
           mkbootimg_args=$(./unpack_bootimg.py --out out --boot_img boot.img --format mkbootimg)
           mv Image.gz-dtb out/kernel
-          eval "./mkbootimg.py $mkbootimg_args -o boot-lineage-${{ env.DEVICE }}.img"
-          mv boot-lineage-${{ env.DEVICE }}.img ../
-
-      - name: 上传 AnyKernel3 安装包
+          eval "./mkbootimg.py $mkbootimg_args -o boot-lineage-${{ matrix.device }}.img"
+          echo "BOOT_IMG_NAME=boot-lineage-${{ matrix.device }}.img" >> $GITHUB_ENV
+      - name: 上传 AnyKernel3
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-${{ env.DEVICE }}-ak3
-          path: anykernel3-*.zip
+          name: kernel-${{ matrix.device }}-ak3
+          path: ${{ env.AK3_ZIP_NAME }}
 
-      - name: 上传 boot 镜像
+      - name: 上传 boot.img
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-${{ env.DEVICE }}-boot
-          path: boot-lineage-${{ env.DEVICE }}.img
+          name: kernel-${{ matrix.device }}-boot
+          path: mkbootimg/${{ env.BOOT_IMG_NAME }}
 
-  # ------------------------------------------------------------
-  # 发布 Release (仅当推送 tag 时触发)
-  # ------------------------------------------------------------
   release:
     name: 发布
-    permissions: { contents: write }
     runs-on: ubuntu-latest
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     steps:
       - name: 下载所有构建产物
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: kernel-*
           merge-multiple: true
 
-      - name: 下载 USB/IP 捆绑包
-        uses: actions/download-artifact@v4
-        with:
-          name: usbip-arm64-bundle
-          path: artifacts/usbip
-
-      - name: 下载管理器 APK
-        uses: actions/download-artifact@v4
-        with:
-          name: Manager-APKs
-          path: artifacts/manager
-
-      - name: 生成时间戳
-        id: time
+      - name: 重命名发布资产为规范格式
         run: |
-          echo "time=$(TZ='Asia/Shanghai' date -u +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
-          echo "timestamp=$(date +%s)" >> $GITHUB_OUTPUT
+          cd artifacts
+          DEVICE="raphael"
+          ANDROID_VER="${{ env.ANDROID_VERSION }}"
+          PACKAGE_NAME="kernel"
+          
+          for file in *.zip; do
+            [ -f "$file" ] && mv "$file" "${PACKAGE_NAME}-${DEVICE}-${ANDROID_VER}.zip"
+          done
+          for file in *.img; do
+            [ -f "$file" ] && mv "$file" "${PACKAGE_NAME}-${DEVICE}-${ANDROID_VER}.img"
+          done
+          for file in *.apk; do
+            [ -f "$file" ] && mv "$file" "${PACKAGE_NAME}-${DEVICE}-${ANDROID_VER}-manager.apk"
+          done
+          if [ -f usbip-arm64-bundle.tar.gz ]; then
+            mv usbip-arm64-bundle.tar.gz "usbip-${DEVICE}-${ANDROID_VER}.tar.gz"
+          fi
+          if [ -f kernel-modules-raphael.tar.gz ]; then
+            mv kernel-modules-raphael.tar.gz "kernel-modules-${DEVICE}-${ANDROID_VER}.tar.gz"
+          fi
+      - name: 获取时间戳
+        id: time
+        run: echo "time=$(TZ='Asia/Shanghai' date -u +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
 
-      - name: 创建 Release
+      - name: 发布到 Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: rel-${{ steps.time.outputs.timestamp }}
-          name: Kernel build ${{ steps.time.outputs.time }}
-          prerelease: ${{ startsWith(github.ref_name, 'dev/') }}
+          tag_name: rel-${{ steps.time.outputs.time }}
+          name: "Kernel build ${{ steps.time.outputs.time }}"
+          draft: false
+          prerelease: true
           files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

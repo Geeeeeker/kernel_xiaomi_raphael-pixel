@@ -138,21 +138,22 @@ jobs:
           # 1. 生成 .config 文件
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
 
-          # 2. 准备基础构建脚本和工具
+          # 2. 准备基础构建环境（单线程，避免竞态）
           make O=out ARCH=arm64 \
             CC="ccache clang" \
             LLVM=1 \
             LLVM_IAS=1 \
-            -j1 scripts_basic
+            -j1 prepare scripts_basic
 
-          # 3. 显式生成 flask.h（SELinux 核心头文件）
+          # 3. 显式生成 SELinux 核心头文件（flask.h 等）
+          #    通过编译 security/selinux/ss 目录，该目录的 Makefile 会自动生成 flask.h
           make O=out ARCH=arm64 \
             CC="ccache clang" \
             LLVM=1 \
             LLVM_IAS=1 \
-            -j1 security/selinux/flask.h
+            -j1 security/selinux/ss/
 
-          # 4. 继续构建整个 security/selinux 以确保其他依赖（如 av_permissions.h）也生成
+          # 4. 继续构建整个 security/selinux，确保其他依赖（如 av_permissions.h）也生成
           make O=out ARCH=arm64 \
             CC="ccache clang" \
             LLVM=1 \

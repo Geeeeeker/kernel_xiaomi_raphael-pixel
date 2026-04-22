@@ -1,4 +1,4 @@
-name: 编译内核 (KernelSU Next + SUSFS + LXC/Docker + USB/IP)
+name: 编译内核 (KernelSU Next3.2.0 + SUSFSv2.1.0 + LXC/Docker + USB/IP + RTL8188EUS)
 
 on:
   push:

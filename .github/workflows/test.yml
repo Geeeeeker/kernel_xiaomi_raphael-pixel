@@ -136,24 +136,6 @@ jobs:
             KCFLAGS="-Wno-unknown-warning-option" \
             ${{ env.DEFCONFIG }} all
 
-
-      # ------------------------------------------------------------
-      # 下载管理器 APK (KernelSU / APatch / Magisk)
-      # ------------------------------------------------------------
-      - name: 下载管理器 APK
-        run: |
-          mkdir -p apk-output
-          wget -O apk-output/KernelSU-Manager.apk \
-            https://github.com/tiann/KernelSU/releases/download/${{ env.KERNELSU_VERSION }}/KernelSU_v${{ env.KERNELSU_VERSION }}_11872-release.apk
-          wget -O apk-output/APatch-Manager.apk \
-            "https://github.com/bmax121/APatch/releases/download/${{ env.APATCH_VERSION }}/APatch_${{ env.APATCH_TAG }}.apk"
-          wget -O apk-output/Magisk-Canary.apk "${{ env.MAGISK_CANARY_URL }}"
-      - name: 上传管理器 APK (Artifact)
-        uses: actions/upload-artifact@v4
-        with:
-          name: Manager-APKs
-          path: apk-output/*.apk
-
       # ------------------------------------------------------------
       # 打包 AnyKernel3 和 boot.img
       # ------------------------------------------------------------
@@ -222,11 +204,6 @@ jobs:
           pattern: kernel-*
           merge-multiple: true
 
-      - name: 下载管理器 APK
-        uses: actions/download-artifact@v4
-        with:
-          name: Manager-APKs
-          path: artifacts/manager
 
       - name: 生成时间戳
         id: time

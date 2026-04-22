@@ -1,3 +1,5 @@
+# CONFIG_FTRACE is not set
+# CONFIG_TRACEPOINTS is not set
 # ====== docker补充 ======
 CONFIG_OVERLAY_FS=y
 CONFIG_LTO_NONE=y

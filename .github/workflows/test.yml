@@ -138,29 +138,18 @@ jobs:
           # 1. 生成 .config 文件
           make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
 
-          # 2. 准备基础构建环境（单线程）
+          # 2. 准备基础构建环境
           make O=out ARCH=arm64 \
             CC="ccache clang" \
             LLVM=1 \
             LLVM_IAS=1 \
             -j1 prepare scripts_basic
 
-          # 3. 构建生成 flask.h 所需的 host 工具 (genheaders)
-          make O=out ARCH=arm64 \
-            CC="ccache clang" \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            -j1 scripts/selinux/genheaders/genheaders
+          # 3. 手动构建缺失的 genheaders 工具
+          mkdir -p scripts/selinux/genheaders
+          gcc -o scripts/selinux/genheaders/genheaders scripts/selinux/genheaders/genheaders.c
 
-          # 4. 手动运行 genheaders 生成 flask.h 和 av_permissions.h
-          #    确保输出目录存在
-          mkdir -p out/security/selinux/include
-          out/scripts/selinux/genheaders/genheaders \
-            security/selinux/include/classmap.h \
-            out/security/selinux/include/flask.h \
-            out/security/selinux/include/av_permissions.h
-
-          # 5. 完整编译内核（多线程加速）
+          # 4. 完整编译内核（多线程加速）
           make O=out ARCH=arm64 \
             CC="ccache clang" \
             LLVM=1 \

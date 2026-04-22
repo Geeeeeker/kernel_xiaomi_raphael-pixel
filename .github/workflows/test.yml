@@ -141,25 +141,31 @@ jobs:
           sed -i 's/CONFIG_VDSO32=y/# CONFIG_VDSO32 is not set/' .config
           cd ..
 
-          # 3. 注释掉 arch/arm64/Makefile 中所有与 CROSS_COMPILE_COMPAT 相关的致命检查
+          # 3. 注释掉 arch/arm64/Makefile 中与 CROSS_COMPILE_COMPAT 相关的致命检查
           sed -i '/CROSS_COMPILE_COMPAT not defined or empty/{s/^/#/; n; s/^/#/}' arch/arm64/Makefile
           sed -i '/gcc not found, check CROSS_COMPILE_COMPAT/{s/^/#/; n; s/^/#/}' arch/arm64/Makefile
 
-          # 4. 补全缺失的 classmap.h（如果内核源码中缺失）
+          # 4. 清除泄漏到主机工具编译的目标 CFLAGS（移除 -mlittle-endian 等）
+          sed -i 's/-mlittle-endian//g' out/Makefile
+          sed -i 's/-mbig-endian//g' out/Makefile
+          sed -i 's/-EL//g' out/Makefile
+          sed -i 's/-EB//g' out/Makefile
+
+          # 5. 补全缺失的 classmap.h（如果内核源码中缺失）
           if [ ! -f security/selinux/include/classmap.h ]; then
             echo "classmap.h not found, downloading..."
             mkdir -p security/selinux/include
             curl -LSs https://raw.githubusercontent.com/torvalds/linux/v4.14/security/selinux/include/classmap.h -o security/selinux/include/classmap.h
           fi
 
-          # 5. 构建主机工具（强制使用纯净的宿主机 gcc，并清除 HOSTCFLAGS）
+          # 6. 构建主机工具（取消交叉编译器，强制使用纯净的宿主机 gcc）
           unset CROSS_COMPILE CROSS_COMPILE_ARM32 CROSS_COMPILE_COMPAT
           make O=out ARCH=arm64 \
             HOSTCC=gcc \
             HOSTCFLAGS="-O2 -Wall" \
             -j1 scripts
 
-          # 6. 手动生成 flask.h 和 av_permissions.h
+          # 7. 手动生成 flask.h 和 av_permissions.h
           mkdir -p out/security/selinux/include
           scripts/selinux/genheaders/genheaders \
             security/selinux/include/classmap.h \
@@ -169,7 +175,7 @@ jobs:
             -t security/selinux/include/classmap.h \
             > out/security/selinux/include/av_permissions.h
 
-          # 7. 完整编译内核（显式传递交叉编译变量）
+          # 8. 完整编译内核（显式传递交叉编译变量）
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \

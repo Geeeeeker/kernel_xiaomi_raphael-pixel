@@ -29,7 +29,7 @@ CONFIG_MEDIA_RC_SUPPORT=y
 CONFIG_RC_DEVICES=y
 
 # Proximity
-CONFIG_US_PROXIMITY=y
+
 
 # Power (explicitly disable unused chargers)
 # CONFIG_SMB1355_SLAVE_CHARGER is not set

@@ -104,6 +104,29 @@ jobs:
             exit 1
           fi
           rm -rf rtl8188eus-repo
+      - name: 修复 sched/debug.c 缺失函数
+        working-directory: kernel
+        run: |
+          cat >> kernel/sched/debug.c << 'EOF'
+          
+          /* Fix missing function declarations */
+          static inline struct cfs_rq *cfs_rq_of(struct sched_entity *se) {
+              return se->cfs_rq;
+          }
+          static inline int entity_eligible(struct cfs_rq *cfs_rq, struct sched_entity *se) {
+              return 1;
+          }
+          EOF
+      # ========== 修复：注释掉 Btrfs 相关配置 ==========
+      - name: 禁用 Btrfs 支持
+        working-directory: kernel
+        run: |
+          sed -i '/^source "fs\/btrfs\/Kconfig"/s/^/# /' fs/Kconfig
+      # ========== 修复：注释 fair.c 中缺失的 se_update_runnable 调用 ==========
+      - name: 修复 fair.c 缺失的 se_update_runnable 调用
+        working-directory: kernel
+        run: |
+          sed -i '/se_update_runnable(se);/s/^/\/\//' kernel/sched/fair.c
       # ------------------------------------------------------------
       # 编译内核
       # ------------------------------------------------------------

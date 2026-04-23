@@ -1,4 +1,15 @@
-# ===== 页面大小与地址空间 =====
+# ========== CPU 掩码及其依赖 ==========
+CONFIG_ARCH_HAS_CPU_MASK=y          # 确保该特性开启（若内核不支持请删除此行）
+CONFIG_LITTLE_CPU_MASK=0x0f
+CONFIG_BIG_CPU_MASK=0x70
+CONFIG_PRIME_CPU_MASK=0x80
+
+# ========== 调度器与 CPU 数量 ==========
+CONFIG_SCHED_MC=y
+CONFIG_SCHED_SMT=y
+CONFIG_NR_CPUS=8
+
+# ========== 页面大小与虚拟地址空间 ==========
 CONFIG_ARM64_4K_PAGES=y
 # CONFIG_ARM64_16K_PAGES is not set
 # CONFIG_ARM64_64K_PAGES is not set
@@ -6,18 +17,7 @@ CONFIG_ARM64_4K_PAGES=y
 CONFIG_ARM64_VA_BITS_39=y
 # CONFIG_ARM64_VA_BITS_48 is not set
 
-# ===== CPU 调度与数量 =====
-CONFIG_CPU_BIG_ENDIAN=n
-CONFIG_SCHED_MC=y
-CONFIG_SCHED_SMT=y
-CONFIG_NR_CPUS=64
-
-# ===== CPU 掩码（Snapdragon 855 典型值） =====
-CONFIG_LITTLE_CPU_MASK=0x0f
-CONFIG_BIG_CPU_MASK=0x70
-CONFIG_PRIME_CPU_MASK=0x80
-
-# ===== 解决 DOCKER 选项的依赖缺失 =====
+# ========== Docker 选项所需的网络过滤依赖 ==========
 CONFIG_NETFILTER=y
 CONFIG_NF_CONNTRACK_IPV4=y
 CONFIG_IP_NF_IPTABLES=y

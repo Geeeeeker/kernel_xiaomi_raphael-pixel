@@ -1,403 +1,95 @@
-name: 编译内核 (KernelSU Next1.1.1 + SUSFSv1.5.9 + LXC/Docker + USB/IP + RTL8188EUS)
+name: Continues testing
 
 on:
   push:
-    branches:
-      - dev/*
-      - stable/*
-    tags:
-      - 'v*'
-  workflow_dispatch:
-
-env:
-  DEVICE: raphael
-  DEFCONFIG: raphael_defconfig
-  ANDROID_VERSION: "16.0"
-  CLANG_VERSION: r547379
-  CLANG_TARBALL_URL: https://github.com/Geeeeeker/boot/releases/download/clang-prebuilts-20260319-031015/clang-r547379.tar.gz
-  MAGISK_CANARY_URL: https://github.com/topjohnwu/Magisk/releases/download/v30.7/Magisk-v30.7.apk
-  KERNELSU_VERSION: v0.9.5
-  APATCH_VERSION: 11142
-  APATCH_TAG: 11142_166daa0_on_HEAD-release-signed
+  pull_request:
 
 jobs:
   build:
-    name: 编译内核 (raphael)   # 修正：直接使用静态设备名
-    permissions:
-      contents: write
     runs-on: ubuntu-latest
-
+    env:
+      KBUILD_BUILD_USER: NATO66613
+      KBUILD_BUILD_HOST: KREMLIN
     steps:
-      # ========== 基础环境准备 ==========
-      - name: 安装依赖软件包
-        run: |
-          sudo apt update
-          sudo apt install -y ccache binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi gcc-arm-linux-gnueabi
-
-      - name: 检出内核源码 (分支 16.0-SUSFS)
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          repository: Geeeeeker/kernel_xiaomi_raphael-pixel
-          ref: 16.0-susfs
-          path: kernel
+          fetch-depth: 1
 
-      # ========== Clang 工具链缓存与下载 ==========
-      - name: 缓存 Clang 工具链
-        id: cache-clang
-        uses: actions/cache@v4
-        with:
-          path: clang
-          key: clang-${{ env.CLANG_VERSION }}
-
-      - name: 下载 Clang 工具链
-        if: steps.cache-clang.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p clang
-          curl -LSs "${{ env.CLANG_TARBALL_URL }}" | tar xz -C clang
-
-      - name: 缓存 ccache
+      - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: kernel-${{ env.DEVICE }}-${{ github.run_id }}
-          restore-keys: kernel-${{ env.DEVICE }}
-          max-size: 5G
+          create-symlink: true
+          key: kernel-build-cache
+          restore-keys: |
+            kernel-build-cache
+          max-size: '10G'
 
-      # ========== 内核配置修改 (LXC/Docker / RTL8188EUS / 修复) ==========
-      - name: 配置 LXC 和 Docker 内核支持
-        working-directory: kernel
-        run: |
-          DEFCONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
+      - name: Restore toolchain cache
+        id: restore-clang
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/r547379
+          key: clang-r547379
 
-          # 克隆 lxc-docker-support 仓库
-          rm -rf utils
-          git clone https://github.com/tomxi1997/lxc-docker-support-for-android.git utils
-
-          # 将 utils/Kconfig 引入根 Kconfig
-          if ! grep -q 'source "utils/Kconfig"' Kconfig; then
-            echo 'source "utils/Kconfig"' >> Kconfig
-          fi
-
-          # 在 defconfig 中启用 Docker
-          echo "CONFIG_DOCKER=y" >> "${DEFCONFIG}"
-          sed -i '/CONFIG_ANDROID_PARANOID_NETWORK/d' "${DEFCONFIG}"
-          echo "# CONFIG_ANDROID_PARANOID_NETWORK is not set" >> "${DEFCONFIG}"
-
-          # 应用 cgroup 补丁
-          if [ -f kernel/cgroup/cgroup.c ]; then
-            sh utils/runcpatch.sh kernel/cgroup/cgroup.c
-          elif [ -f kernel/cgroup.c ]; then
-            sh utils/runcpatch.sh kernel/cgroup.c
-          else
-            echo "Warning: cgroup.c not found, skipping runcpatch.sh"
-          fi
-
-          # 应用 xt_qtaguid 补丁
-          if [ -f net/netfilter/xt_qtaguid.c ]; then
-            patch -p0 < utils/xt_qtaguid.patch
-          fi
-
-          # 自定义 LOCALVERSION
-          sed -i '/CONFIG_LOCALVERSION/d' "${DEFCONFIG}"
-          echo 'CONFIG_LOCALVERSION="-LXC-KSU-Next"' >> "${DEFCONFIG}"
-
-      - name: 添加 rtl8188eus WiFi 驱动
-        working-directory: kernel
-        run: |
-          git clone --depth=1 --branch master https://github.com/Geeeeeker/android_kernel_xiaomi_sdm845.git rtl8188eus-repo
-          if [ -d "rtl8188eus-repo/drivers/rtl8188eus" ]; then
-            cp -r rtl8188eus-repo/drivers/rtl8188eus drivers/
-            echo 'obj-$(CONFIG_RTL8188EU) += rtl8188eus/' >> drivers/Makefile
-            echo 'source "drivers/rtl8188eus/Kconfig"' >> drivers/Kconfig
-          else
-            echo "Error: rtl8188eus directory not found"
-            exit 1
-          fi
-          rm -rf rtl8188eus-repo
-      - name: 强制 modpost 忽略段不匹配错误
-        working-directory: kernel
-        run: |
-          # 备份原始 Makefile
-          cp scripts/Makefile.modpost scripts/Makefile.modpost.bak
-          
-          # 在 modpost 调用中添加 KBUILD_MODPOST_WARN=1 环境变量
-          sed -i '/^cmd_modpost =/ s/modpost/modpost $(if $(KBUILD_MODPOST_WARN),-w)/' scripts/Makefile.modpost
-          
-          # 或更简单的方法：直接删除 fatal 行
-          sed -i 's/-e "Section mismatches"/-e "Section mismatches (ignored)"/g' scripts/Makefile.modpost
-          sed -i 's/exit 1/exit 0/g' scripts/Makefile.modpost
-      # ========== 强制修复段不匹配 + 修补源码 ==========
-      - name: 生成并修正 .config
-        working-directory: kernel
-        run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          make O=out ARCH=arm64 LLVM=1 ${{ env.DEFCONFIG }}
-          ./scripts/config --file out/.config --enable SECTION_MISMATCH_WARN_ONLY
-          ./scripts/config --file out/.config --disable DEBUG_SECTION_MISMATCH
-          make O=out ARCH=arm64 LLVM=1 olddefconfig
-
-      - name: 修补 regulator_stub.c (移除 __init)
-        working-directory: kernel
-        run: |
-          if [ -f drivers/regulator/stub.c ]; then
-            sed -i 's/__init//g' drivers/regulator/stub.c
-            sed -i 's/__ref//g' drivers/regulator/stub.c
-            echo "regulator_stub.c 已修补。"
-          fi
-
-      # ========== 修复：注释掉 Btrfs 相关配置 ==========
-      - name: 禁用 Btrfs 支持
-        working-directory: kernel
-        run: |
-          sed -i '/^source "fs\/btrfs\/Kconfig"/s/^/# /' fs/Kconfig
-      # ========== 修复：注释 fair.c 中缺失的 se_update_runnable 调用 ==========
-      - name: 修复 fair.c 缺失的 se_update_runnable 调用
-        working-directory: kernel
-        run: |
-          sed -i '/se_update_runnable(se);/s/^/\/\//' kernel/sched/fair.c
-      # ------------------------------------------------------------
-      # 编译内核
-      # ------------------------------------------------------------
-      - name: 编译内核
-        working-directory: kernel
-        run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
-          export KBUILD_BUILD_USER="${{ github.repository_owner }}"
-          export KBUILD_BUILD_HOST="github-runner"
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export KBUILD_MODPOST_WARN=1
-          make -j$(nproc --all) \
-            CC="ccache clang" \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            O=out \
-            KCFLAGS="-Wno-unknown-warning-option" \
-            all
-      # ========== USB/IP 支持 ==========
-      - name: 设置 QEMU 用户态支持 (用于 arm64 容器)
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
-          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+          sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
+          
+          ccache --show-stats
 
-      - name: 编译 USB/IP 内核模块（可选）
-        working-directory: kernel
+      - name: Deploy Clang
+        if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
-          make -j$(nproc) \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            O=out \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            M=drivers/usb/usbip \
-            modules || echo "Warning: USB/IP modules build skipped or failed."
+          git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
 
-          mkdir -p $GITHUB_WORKSPACE/usbip-out/modules
-          # 仅当 .ko 文件存在时才复制
-          if ls out/drivers/usb/usbip/*.ko 1> /dev/null 2>&1; then
-              cp out/drivers/usb/usbip/*.ko $GITHUB_WORKSPACE/usbip-out/modules/
-          else
-              echo "No USB/IP kernel modules generated (probably built-in)."
-          fi
+      - name: Save clang
+        if: steps.restore-clang.outputs.cache-hit != 'true'
+        id: cache-clang-save
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/r547379
+          key: clang-r547379
 
-      - name: 编译 USB/IP 用户态工具 (Docker arm64 容器)
+      - name: Build the kernel with `ccache`
         run: |
-          mkdir -p usbip-out/{bin,libs}
-          docker run --rm --platform linux/arm64 \
-            --memory=6g \
-            -v ${{ github.workspace }}:/workspace \
-            -v ${{ github.workspace }}/usbip-out:/output \
-            -w /workspace/kernel \
-            arm64v8/ubuntu:22.04 \
-            bash -c "
-              set -e
-              export DEBIAN_FRONTEND=noninteractive
-              ulimit -s unlimited
-              apt update
-              apt install -y \
-                build-essential \
-                autoconf \
-                libtool \
-                pkg-config \
-                libudev-dev \
-                libssl-dev \
-                flex \
-                bison \
-                file \
-                patchelf
-              cd tools/usb/usbip
-              ./autogen.sh
-              ./configure CFLAGS=\"-Wno-error -Wno-error=stringop-truncation\" --with-tcp-wrappers=no
-              make -j1
-              cp src/.libs/usbip /output/bin/
-              cp src/.libs/usbipd /output/bin/
-              cp libsrc/.libs/libusbip.so.0* /output/libs/
-              cd /output
-              BINARIES=\"bin/usbip bin/usbipd libs/libusbip.so.0*\"
-              DEPS=\"\"
-              for file in \$BINARIES; do
-                if [ -f \"\$file\" ]; then
-                  needed=\$(readelf -d \"\$file\" | grep NEEDED | awk '{print \$5}' | tr -d '[]' || true)
-                  for lib in \$needed; do
-                    if [[ \"\$DEPS\" != *\"\$lib\"* ]]; then
-                      DEPS=\"\$DEPS \$lib\"
-                    fi
-                  done
-                fi
-              done
-              for lib in \$(echo \$DEPS | tr ' ' '\\n' | sort -u); do
-                libpath=\$(ldconfig -p | grep \"\$lib (\" | head -1 | awk '{print \$NF}' || true)
-                if [ -z \"\$libpath\" ]; then
-                  libpath=\$(find /lib /usr/lib -name \"\$lib\" -type f 2>/dev/null | head -1 || true)
-                fi
-                if [ -n \"\$libpath\" ]; then
-                  cp -P \"\$libpath\" libs/ 2>/dev/null || cp \"\$libpath\" libs/
-                  for reallib in \$(find \"\$(dirname \"\$libpath\")\" -name \"\${lib%.so*}*\" -type f 2>/dev/null); do
-                    cp -n \"\$reallib\" libs/ 2>/dev/null || true
-                  done
-                fi
-              done
-              ld_linux=\"/lib/ld-linux-aarch64.so.1\"
-              if [ -f \"\$ld_linux\" ]; then
-                cp -P \"\$ld_linux\" libs/
-              fi
-            "
+          export CLANG_PATH=$HOME/r547379/bin
+          export PATH=${CLANG_PATH}:${PATH}
+          
+          # Use ccache explicitly
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
 
-      - name: 打包 USB/IP 产物
+          # Show ccache stats after build
+          ccache --show-stats
+          ccache --show-config
+        shell: bash
+
+      - name: Repack Kernel Artifacts
         run: |
-          cd usbip-out
-          tar czf ../usbip-arm64-bundle.tar.gz .
-          cd ..
+          git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
+          cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
+          cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
 
-      - name: 上传 USB/IP 捆绑包 (Artifact)
+          # Determine branch name and commit hash (first 6 characters)
+          BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')
+          COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
+          ZIP_NAME="${BRANCH}-${COMMIT_HASH}.zip"
+          echo $ZIP_NAME
+
+          # Export ZIP_NAME for later steps
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+
+          # Move entire AnyKernel3 directory to workspace
+          mv "$HOME/AnyKernel3" "$GITHUB_WORKSPACE/AnyKernel3"
+
+          # Verify contents of AnyKernel3 in workspace
+          ls -lah $GITHUB_WORKSPACE/AnyKernel3
+        shell: bash
+
+      - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: usbip-arm64-bundle
-          path: usbip-arm64-bundle.tar.gz
-
-      # ========== 打包 AnyKernel3 ==========
-      - name: 打包 AnyKernel3 刷机包
-        run: |
-          git clone https://github.com/osm0sis/AnyKernel3 --depth=1 ak3
-          cp kernel/out/arch/arm64/boot/Image.gz-dtb ak3/
-          cp kernel/out/arch/arm64/boot/dtbo.img ak3/ || true
-
-          cd ak3
-          cat >anykernel.sh <<EOF
-          properties() { '
-          kernel.string=Kernel for ${{ env.DEVICE }} with KSU Next + SUSFS + LXC/Docker
-          device.name1=${{ env.DEVICE }}
-          do.devicecheck=1
-          '; }
-          ramdisk_compression=auto
-          patch_vbmeta_flag=auto
-          is_slot_device=auto
-          block=auto
-          . tools/ak3-core.sh
-          split_boot
-          flash_boot
-          EOF
-
-          DATE=$(date +%Y%m%d)
-          ZIP_NAME="anykernel3-${{ env.DEVICE }}-${{ env.ANDROID_VERSION }}-${DATE}.zip"
-          zip -qr9 "${ZIP_NAME}" * -x .git .github README.md *placeholder
-          mv "${ZIP_NAME}" ../
-          echo "AK3_ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-
-      - name: 上传 AnyKernel3 安装包
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-${{ env.DEVICE }}-ak3
-          path: anykernel3-*.zip
-
-      # ========== 打包 boot.img (LineageOS) ==========
-      - name: 打包 boot.img
-        run: |
-          git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg mkbootimg
-          cp kernel/out/arch/arm64/boot/Image.gz-dtb mkbootimg/
-
-          cd mkbootimg
-          BOOT_IMG_URL="https://github.com/Geeeeeker/boot/releases/download/extracted-roms-20260322-062443/LineageOS_boot.img"
-          curl -LSs "$BOOT_IMG_URL" -o boot.img
-
-          mkbootimg_args=$(./unpack_bootimg.py --out out --boot_img boot.img --format mkbootimg)
-          mv Image.gz-dtb out/kernel
-          eval "./mkbootimg.py $mkbootimg_args -o boot-lineage-${{ env.DEVICE }}.img"
-
-          echo "BOOT_IMG_NAME=boot-lineage-${{ env.DEVICE }}.img" >> $GITHUB_ENV
-
-      - name: 上传 boot 镜像
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-${{ env.DEVICE }}-boot
-          path: mkbootimg/boot-lineage-${{ env.DEVICE }}.img
-
-      # ========== 下载管理器 APK ==========
-      - name: 创建 APK 输出目录
-        run: mkdir -p apk-output
-
-      - name: 下载 KernelSU Manager APK
-        run: |
-          wget -O apk-output/KernelSU-Manager.apk \
-            https://github.com/tiann/KernelSU/releases/download/${{ env.KERNELSU_VERSION }}/KernelSU_${{ env.KERNELSU_VERSION }}_11872-release.apk
-
-      - name: 下载 APatch Manager APK
-        run: |
-          APATCH_URL="https://github.com/bmax121/APatch/releases/download/${{ env.APATCH_VERSION }}/APatch_${{ env.APATCH_TAG }}.apk"
-          wget -O apk-output/APatch-Manager.apk "$APATCH_URL"
-
-      - name: 下载 Magisk Canary APK
-        run: |
-          wget -O apk-output/Magisk-Canary.apk "${{ env.MAGISK_CANARY_URL }}"
-
-      - name: 上传 APK 工件
-        uses: actions/upload-artifact@v4
-        with:
-          name: Manager-APKs
-          path: apk-output/*.apk
-
-  # ========== Release (仅推送 tag 时触发) ==========
-  release:
-    name: 发布
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - name: 下载所有构建产物
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: kernel-*
-          merge-multiple: true
-
-      - name: 获取 USB/IP 捆绑包
-        uses: actions/download-artifact@v4
-        with:
-          name: usbip-arm64-bundle
-          path: artifacts/usbip
-
-      - name: 获取 APK 合集
-        uses: actions/download-artifact@v4
-        with:
-          name: Manager-APKs
-          path: artifacts/manager
-
-      - name: 生成时间戳
-        id: time
-        run: |
-          echo "time=$(TZ='Asia/Shanghai' date -u +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
-          echo "timestamp=$(date +%s)" >> $GITHUB_OUTPUT
-
-      - name: 创建 Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: rel-${{ steps.time.outputs.timestamp }}
-          name: Kernel build ${{ steps.time.outputs.time }}
-          prerelease: ${{ startsWith(github.ref_name, 'dev/') }}
-          files: artifacts/*
+          name: ${{ env.ZIP_NAME }}  # Dynamic naming for artifact
+          path: ${{ github.workspace }}/AnyKernel3/

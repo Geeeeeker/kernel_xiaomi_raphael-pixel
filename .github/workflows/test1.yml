@@ -55,7 +55,7 @@ jobs:
       - name: 配置 LXC 和 Docker 内核支持
         working-directory: kernel
         run: |
-          DEFCONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
+          DEFCONFIG="arch/arm64/configs/raphael_defconfig"
 
           # 克隆 lxc-docker-support 仓库
           rm -rf utils

@@ -114,31 +114,13 @@ jobs:
           fi
           rm -rf rtl8188eus-repo
 
-
-      # ========== 修复配置依赖和交互问题 ==========
-      - name: 设置 CPU 掩码默认值并解决配置依赖
+      - name: 更新内核配置 (非交互)
         working-directory: kernel
         run: |
-          DEFCONFIG="arch/arm64/configs/${{ env.DEFCONFIG }}"
-
-          # 设置 CPU 掩码默认值 (根据 Snapdragon 855 核心拓扑调整)
-          # 通常 1+3+4 架构：LITTLE (0-3) = 0x0f，BIG (4-6) = 0x70，PRIME (7) = 0x80
-          echo "CONFIG_LITTLE_CPU_MASK=0x0f" >> "${DEFCONFIG}"
-          echo "CONFIG_BIG_CPU_MASK=0x70" >> "${DEFCONFIG}"
-          echo "CONFIG_PRIME_CPU_MASK=0x80" >> "${DEFCONFIG}"
-
-          # 解决 DOCKER 配置依赖缺失问题
-          echo "CONFIG_NETFILTER=y" >> "${DEFCONFIG}"
-          echo "CONFIG_NF_CONNTRACK_IPV4=y" >> "${DEFCONFIG}"
-          echo "CONFIG_IP_NF_IPTABLES=y" >> "${DEFCONFIG}"
-          echo "CONFIG_IP_NF_NAT=y" >> "${DEFCONFIG}"
-          echo "CONFIG_NF_NAT_IPV4=y" >> "${DEFCONFIG}"
-
-          # 使用 olddefconfig 非交互式更新配置 (自动采用默认值)
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          make -j$(nproc --all) \
+          make -j$(nproc) \
             CC="ccache clang" \
             ARCH=arm64 \
             LLVM=1 \
@@ -147,9 +129,6 @@ jobs:
             KCFLAGS="-Wno-unknown-warning-option" \
             olddefconfig
 
-      # ------------------------------------------------------------
-      # 编译内核
-      # ------------------------------------------------------------
       - name: 编译内核
         working-directory: kernel
         run: |

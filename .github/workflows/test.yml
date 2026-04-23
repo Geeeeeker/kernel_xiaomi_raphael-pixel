@@ -174,7 +174,7 @@ jobs:
         run: |
           mkdir -p usbip-out/{bin,libs}
           docker run --rm --platform linux/arm64 \
-            --memory=6g \
+            --memory=8g \
             -v ${{ github.workspace }}:/workspace \
             -v ${{ github.workspace }}/usbip-out:/output \
             -w /workspace/kernel \

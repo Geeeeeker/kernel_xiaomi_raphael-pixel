@@ -21,7 +21,24 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
+      # 9. 禁用 Btrfs 支持（安全版本）
+      - name: 禁用 Btrfs 支持
+        run: |
+          if [ -f fs/Kconfig ]; then
+            sed -i '/^source "fs\/btrfs\/Kconfig"/s/^/# /' fs/Kconfig
+            echo "Btrfs support disabled in fs/Kconfig"
+          else
+            echo "fs/Kconfig not found, skipping Btrfs disable step."
+          fi
+      # 10. 修复 fair.c 缺失的 se_update_runnable 调用（安全版本）
+      - name: 修复 fair.c 缺失的 se_update_runnable 调用
+        run: |
+          if [ -f kernel/sched/fair.c ]; then
+            sed -i '/se_update_runnable(se);/s/^/\/\//' kernel/sched/fair.c
+            echo "Patched kernel/sched/fair.c"
+          else
+            echo "kernel/sched/fair.c not found, skipping patch."
+          fi
       # 3. 添加 rtl8188eus 无线网卡驱动（明确指定 master 分支）
       - name: Add rtl8188eus WiFi driver
         run: |

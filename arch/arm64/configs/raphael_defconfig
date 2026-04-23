@@ -3,17 +3,7 @@ CONFIG_DEBUG_ALIGN_RODATA=y
 CONFIG_SECTION_MISMATCH_WARN_ONLY=y
 # ====== KernelSU kprobes 完整支持（必要补充） ======
 CONFIG_HAVE_SYSCALL_TRACEPOINTS=y
-CONFIG_MODULES=y
-CONFIG_MODULE_UNLOAD=y
 
-# ====== 确保以下选项与 bak 保持一致（覆盖可能被依赖开启的选项） ======
-# CONFIG_SCHED_DEBUG is not set
-# CONFIG_TRACEPOINTS is not set
-# CONFIG_FTRACE is not set
-# CONFIG_SCHED_WALT is not set
-# CONFIG_UCLAMP_TASK is not set
-# CONFIG_UCLAMP_TASK_GROUP is not set
-# CONFIG_MQ_IOSCHED_DEADLINE is not set
 # ====== SELINUX相关（可以去除） ======
 CONFIG_SECURITY=y
 CONFIG_SECURITY_SELINUX=y

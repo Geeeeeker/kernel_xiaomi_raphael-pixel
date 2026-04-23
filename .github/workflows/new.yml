@@ -127,6 +127,24 @@ jobs:
         working-directory: kernel
         run: |
           sed -i '/se_update_runnable(se);/s/^/\/\//' kernel/sched/fair.c
+      - name: 强制禁用 TRACEPOINTS 及 FTRACE
+        working-directory: kernel
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+          # 生成基础 .config
+          make O=out ARCH=arm64 LLVM=1 ${{ env.DEFCONFIG }}
+
+          # 强制关闭所有跟踪相关选项
+          scripts/config --file out/.config --disable TRACEPOINTS
+          scripts/config --file out/.config --disable FTRACE
+          scripts/config --file out/.config --disable BLK_DEV_IO_TRACE
+          scripts/config --file out/.config --disable ANDROID_BINDER_IPC_SELFTEST
+
+          # 非交互更新依赖
+          make O=out ARCH=arm64 LLVM=1 olddefconfig
       # ------------------------------------------------------------
       # 编译内核
       # ------------------------------------------------------------

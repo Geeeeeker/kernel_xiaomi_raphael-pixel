@@ -1,15 +1,34 @@
-# ====== KernelSU 额外所需（确保 kprobes.o 生成） ======
+# ====== KernelSU Next 基础支持（最小必需项） ======
 CONFIG_KPROBES=y
 CONFIG_KRETPROBES=y
-CONFIG_KPROBE_EVENTS=y
 CONFIG_HAVE_KPROBES=y
+CONFIG_KPROBE_EVENTS=y
 CONFIG_KALLSYMS=y
 CONFIG_KALLSYMS_ALL=y
 CONFIG_DEBUG_KERNEL=y
-CONFIG_HAVE_SYSCALL_TRACEPOINTS=y
 CONFIG_MODULES=y
 CONFIG_MODULE_UNLOAD=y
+CONFIG_MODVERSIONS=y
+CONFIG_HAVE_SYSCALL_TRACEPOINTS=y
+
+# ====== KernelSU 本体及 Hook 模式 ======
+CONFIG_KSU=y
+CONFIG_KSU_KPROBES_HOOK=y
+CONFIG_KSU_MANUAL_SU=y
+CONFIG_KPM=y
+
+# ====== 强制允许段不匹配，绕过 regulator_stub_init 错误 ======
 CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+# CONFIG_DEBUG_SECTION_MISMATCH is not set
+
+# ====== 主动关闭会引发编译错误的选项（覆盖可能被依赖开启的） ======
+# CONFIG_TRACEPOINTS is not set
+# CONFIG_FTRACE is not set
+# CONFIG_SCHED_DEBUG is not set
+# CONFIG_SCHED_WALT is not set
+# CONFIG_UCLAMP_TASK is not set
+# CONFIG_UCLAMP_TASK_GROUP is not set
+# CONFIG_MQ_IOSCHED_DEADLINE is not set
 
 # ====== 高通蓝牙SMD支持 ======
 CONFIG_QCOM_SMD=y

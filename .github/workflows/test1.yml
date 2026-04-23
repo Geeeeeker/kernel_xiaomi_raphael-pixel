@@ -52,37 +52,112 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
       # ========== 内核配置修改 (LXC/Docker / RTL8188EUS / 修复) ==========
-      # 7. 配置 LXC 和 Docker 内核支持
+     name: Continues testing
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KBUILD_BUILD_USER: NATO66613
+      KBUILD_BUILD_HOST: KREMLIN
+      DEFCONFIG: raphael_defconfig          # 确保这里填写的 defconfig 名称正确
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          create-symlink: true
+          key: kernel-build-cache
+          restore-keys: |
+            kernel-build-cache
+          max-size: '10G'
+
+      - name: Restore toolchain cache
+        id: restore-clang
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/r547379
+          key: clang-r547379
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
+          ccache --show-stats
+
+      - name: Deploy Clang
+        if: steps.restore-clang.outputs.cache-hit != 'true'
+        run: |
+          git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
+
+      - name: Save clang cache
+        if: steps.restore-clang.outputs.cache-hit != 'true'
+        id: cache-clang-save
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/r547379
+          key: clang-r547379
+
+      # ========== 内核配置修改 (LXC/Docker / RTL8188EUS / 修复) ==========
+
       - name: 配置 LXC 和 Docker 内核支持
         run: |
+          # 严格检查 DEFCONFIG 变量
+          if [ -z "$DEFCONFIG" ]; then
+            echo "❌ DEFCONFIG is not set. Please define it in env."
+            exit 1
+          fi
+
           DEFCONFIG_PATH="arch/arm64/configs/${DEFCONFIG}"
+          echo "📄 Target defconfig: $DEFCONFIG_PATH"
+
+          # 确保 defconfig 文件存在
+          if [ ! -f "$DEFCONFIG_PATH" ]; then
+            echo "❌ $DEFCONFIG_PATH does not exist!"
+            exit 1
+          fi
+
+          # 克隆 lxc-docker-support 工具
           rm -rf utils
           git clone https://github.com/tomxi1997/lxc-docker-support-for-android.git utils
 
+          # 引入 Kconfig 条目
           if ! grep -q 'source "utils/Kconfig"' Kconfig; then
             echo 'source "utils/Kconfig"' >> Kconfig
           fi
 
+          # 修改 defconfig
           echo "CONFIG_DOCKER=y" >> "${DEFCONFIG_PATH}"
           sed -i '/CONFIG_ANDROID_PARANOID_NETWORK/d' "${DEFCONFIG_PATH}"
           echo "# CONFIG_ANDROID_PARANOID_NETWORK is not set" >> "${DEFCONFIG_PATH}"
 
+          # 应用 cgroup 补丁
           if [ -f kernel/cgroup/cgroup.c ]; then
             sh utils/runcpatch.sh kernel/cgroup/cgroup.c
           elif [ -f kernel/cgroup.c ]; then
             sh utils/runcpatch.sh kernel/cgroup.c
           else
-            echo "Warning: cgroup.c not found, skipping runcpatch.sh"
+            echo "⚠️ cgroup.c not found, skipping runcpatch.sh"
           fi
 
+          # 应用 xt_qtaguid 补丁
           if [ -f net/netfilter/xt_qtaguid.c ]; then
             patch -p0 < utils/xt_qtaguid.patch
           fi
 
+          # 自定义 LOCALVERSION
           sed -i '/CONFIG_LOCALVERSION/d' "${DEFCONFIG_PATH}"
           echo 'CONFIG_LOCALVERSION="-LXC-KSU-Next"' >> "${DEFCONFIG_PATH}"
 
-      # 8. 添加 rtl8188eus WiFi 驱动
       - name: 添加 rtl8188eus WiFi 驱动
         run: |
           git clone --depth=1 --branch master https://github.com/Geeeeeker/android_kernel_xiaomi_sdm845.git rtl8188eus-repo
@@ -91,30 +166,63 @@ jobs:
             echo 'obj-$(CONFIG_RTL8188EU) += rtl8188eus/' >> drivers/Makefile
             echo 'source "drivers/rtl8188eus/Kconfig"' >> drivers/Kconfig
           else
-            echo "Error: rtl8188eus directory not found"
+            echo "❌ rtl8188eus directory not found"
             exit 1
           fi
           rm -rf rtl8188eus-repo
 
-      # 9. 禁用 Btrfs 支持（安全版本）
       - name: 禁用 Btrfs 支持
         run: |
           if [ -f fs/Kconfig ]; then
             sed -i '/^source "fs\/btrfs\/Kconfig"/s/^/# /' fs/Kconfig
-            echo "Btrfs support disabled in fs/Kconfig"
+            echo "✅ Btrfs support disabled in fs/Kconfig"
           else
-            echo "fs/Kconfig not found, skipping Btrfs disable step."
+            echo "ℹ️ fs/Kconfig not found, skipping Btrfs disable step."
           fi
 
-      # 10. 修复 fair.c 缺失的 se_update_runnable 调用（安全版本）
       - name: 修复 fair.c 缺失的 se_update_runnable 调用
         run: |
           if [ -f kernel/sched/fair.c ]; then
             sed -i '/se_update_runnable(se);/s/^/\/\//' kernel/sched/fair.c
-            echo "Patched kernel/sched/fair.c"
+            echo "✅ Patched kernel/sched/fair.c"
           else
-            echo "kernel/sched/fair.c not found, skipping patch."
+            echo "ℹ️ kernel/sched/fair.c not found, skipping patch."
           fi
+
+      # ========== 内核构建 ==========
+      - name: Build the kernel with ccache
+        run: |
+          export CLANG_PATH=$HOME/r547379/bin
+          export PATH=${CLANG_PATH}:${PATH}
+          
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" ${DEFCONFIG}
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo)
+          
+          ccache --show-stats
+          ccache --show-config
+        shell: bash
+
+      # ========== 打包上传 ==========
+      - name: Repack Kernel Artifacts
+        run: |
+          git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
+          cp out/arch/arm64/boot/Image.gz-dtb $HOME/AnyKernel3/
+          cp out/arch/arm64/boot/dtbo.img $HOME/AnyKernel3/
+          
+          BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | sed 's|/|-|g')
+          COMMIT_HASH=$(echo "$GITHUB_SHA" | cut -c1-6)
+          ZIP_NAME="${BRANCH}-${COMMIT_HASH}.zip"
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+          
+          mv "$HOME/AnyKernel3" "$GITHUB_WORKSPACE/AnyKernel3"
+          ls -lah $GITHUB_WORKSPACE/AnyKernel3
+        shell: bash
+
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ github.workspace }}/AnyKernel3/
       - name: Build the kernel with `ccache`
         run: |
           export CLANG_PATH=$HOME/r547379/bin

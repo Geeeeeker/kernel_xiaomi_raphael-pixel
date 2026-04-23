@@ -52,9 +52,38 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
       # ========== 内核配置修改 (LXC/Docker / RTL8188EUS / 修复) ==========
+      # 7. 配置 LXC 和 Docker 内核支持
+      - name: 配置 LXC 和 Docker 内核支持
+        run: |
+          DEFCONFIG_PATH="arch/arm64/configs/${DEFCONFIG}"
+          rm -rf utils
+          git clone https://github.com/tomxi1997/lxc-docker-support-for-android.git utils
 
+          if ! grep -q 'source "utils/Kconfig"' Kconfig; then
+            echo 'source "utils/Kconfig"' >> Kconfig
+          fi
+
+          echo "CONFIG_DOCKER=y" >> "${DEFCONFIG_PATH}"
+          sed -i '/CONFIG_ANDROID_PARANOID_NETWORK/d' "${DEFCONFIG_PATH}"
+          echo "# CONFIG_ANDROID_PARANOID_NETWORK is not set" >> "${DEFCONFIG_PATH}"
+
+          if [ -f kernel/cgroup/cgroup.c ]; then
+            sh utils/runcpatch.sh kernel/cgroup/cgroup.c
+          elif [ -f kernel/cgroup.c ]; then
+            sh utils/runcpatch.sh kernel/cgroup.c
+          else
+            echo "Warning: cgroup.c not found, skipping runcpatch.sh"
+          fi
+
+          if [ -f net/netfilter/xt_qtaguid.c ]; then
+            patch -p0 < utils/xt_qtaguid.patch
+          fi
+
+          sed -i '/CONFIG_LOCALVERSION/d' "${DEFCONFIG_PATH}"
+          echo 'CONFIG_LOCALVERSION="-LXC-KSU-Next"' >> "${DEFCONFIG_PATH}"
+
+      # 8. 添加 rtl8188eus WiFi 驱动
       - name: 添加 rtl8188eus WiFi 驱动
-        working-directory: kernel
         run: |
           git clone --depth=1 --branch master https://github.com/Geeeeeker/android_kernel_xiaomi_sdm845.git rtl8188eus-repo
           if [ -d "rtl8188eus-repo/drivers/rtl8188eus" ]; then
@@ -66,16 +95,26 @@ jobs:
             exit 1
           fi
           rm -rf rtl8188eus-repo
-      # ========== 修复：注释掉 Btrfs 相关配置 ==========
+
+      # 9. 禁用 Btrfs 支持（安全版本）
       - name: 禁用 Btrfs 支持
-        working-directory: kernel
         run: |
-          sed -i '/^source "fs\/btrfs\/Kconfig"/s/^/# /' fs/Kconfig
-      # ========== 修复：注释 fair.c 中缺失的 se_update_runnable 调用 ==========
+          if [ -f fs/Kconfig ]; then
+            sed -i '/^source "fs\/btrfs\/Kconfig"/s/^/# /' fs/Kconfig
+            echo "Btrfs support disabled in fs/Kconfig"
+          else
+            echo "fs/Kconfig not found, skipping Btrfs disable step."
+          fi
+
+      # 10. 修复 fair.c 缺失的 se_update_runnable 调用（安全版本）
       - name: 修复 fair.c 缺失的 se_update_runnable 调用
-        working-directory: kernel
         run: |
-          sed -i '/se_update_runnable(se);/s/^/\/\//' kernel/sched/fair.c
+          if [ -f kernel/sched/fair.c ]; then
+            sed -i '/se_update_runnable(se);/s/^/\/\//' kernel/sched/fair.c
+            echo "Patched kernel/sched/fair.c"
+          else
+            echo "kernel/sched/fair.c not found, skipping patch."
+          fi
       - name: Build the kernel with `ccache`
         run: |
           export CLANG_PATH=$HOME/r547379/bin

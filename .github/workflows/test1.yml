@@ -96,7 +96,26 @@ jobs:
         with:
           path: /home/runner/r547379
           key: clang-r547379
-
+      # 2.5 集成 KernelSU (使用官方 KPROBES 方式)
+      - name: 集成 KernelSU (官方 KPROBES 方式)
+        run: |
+          # 1. 使用官方脚本自动集成 KernelSU 驱动
+          # 注意：由于你的内核是非GKI，必须指定兼容的版本，这里使用 v0.9.5
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          
+          # 2. 确保内核配置中包含 KPROBES 相关选项 (集成脚本已做，但再次确认更稳妥)
+          DEFCONFIG="arch/arm64/configs/raphael_defconfig"
+          if ! grep -q "CONFIG_KPROBES=y" $DEFCONFIG; then
+            echo "CONFIG_KPROBES=y" >> $DEFCONFIG
+          fi
+          if ! grep -q "CONFIG_HAVE_KPROBES=y" $DEFCONFIG; then
+            echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
+          fi
+          if ! grep -q "CONFIG_KPROBE_EVENTS=y" $DEFCONFIG; then
+            echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
+          fi
+          
+          echo "✅ KernelSU (v0.9.5) 源码及 KPROBES 集成配置已应用。"
       # 10. 配置内核基础参数（修改 defconfig）
       - name: 配置内核基础参数
         run: |

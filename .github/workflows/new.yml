@@ -113,22 +113,9 @@ jobs:
             exit 1
           fi
           rm -rf rtl8188eus-repo
-
-      - name: 更新内核配置 (非交互)
-        working-directory: kernel
-        run: |
-          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          make -j$(nproc) \
-            CC="ccache clang" \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            O=out \
-            KCFLAGS="-Wno-unknown-warning-option" \
-            olddefconfig
-
+      # ------------------------------------------------------------
+      # 编译内核
+      # ------------------------------------------------------------
       - name: 编译内核
         working-directory: kernel
         run: |
@@ -144,7 +131,7 @@ jobs:
             LLVM_IAS=1 \
             O=out \
             KCFLAGS="-Wno-unknown-warning-option" \
-            all
+            ${{ env.DEFCONFIG }} all
       # ========== USB/IP 支持 ==========
       - name: 设置 QEMU 用户态支持 (用于 arm64 容器)
         run: |

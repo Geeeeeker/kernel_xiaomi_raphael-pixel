@@ -113,14 +113,27 @@ jobs:
             exit 1
           fi
           rm -rf rtl8188eus-repo
-      - name: 修复 regulator_stub_init 段不匹配
+      # ========== 强制修复段不匹配 + 修补源码 ==========
+      - name: 生成并修正 .config
+        working-directory: kernel
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          make O=out ARCH=arm64 LLVM=1 ${{ env.DEFCONFIG }}
+          ./scripts/config --file out/.config --enable SECTION_MISMATCH_WARN_ONLY
+          ./scripts/config --file out/.config --disable DEBUG_SECTION_MISMATCH
+          make O=out ARCH=arm64 LLVM=1 olddefconfig
+
+      - name: 修补 regulator_stub.c (移除 __init)
         working-directory: kernel
         run: |
           if [ -f drivers/regulator/stub.c ]; then
             sed -i 's/__init//g' drivers/regulator/stub.c
-          else
-            echo "Warning: drivers/regulator/stub.c not found, skip patching."
+            sed -i 's/__ref//g' drivers/regulator/stub.c
+            echo "regulator_stub.c 已修补。"
           fi
+
       # ========== 修复：注释掉 Btrfs 相关配置 ==========
       - name: 禁用 Btrfs 支持
         working-directory: kernel

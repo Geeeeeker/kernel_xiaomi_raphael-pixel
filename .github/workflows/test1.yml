@@ -96,26 +96,34 @@ jobs:
         with:
           path: /home/runner/r547379
           key: clang-r547379
-      # 2.5 集成 KernelSU (使用官方 KPROBES 方式)
-      - name: 集成 KernelSU (官方 KPROBES 方式)
+      # 2.5 执行仓库内已有的 KernelSU 集成脚本
+      - name: 集成 KernelSU 驱动 (使用本地 setup.sh)
         run: |
-          # 1. 使用官方脚本自动集成 KernelSU 驱动
-          # 注意：由于你的内核是非GKI，必须指定兼容的版本，这里使用 v0.9.5
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s v0.9.5
+          # 确保脚本存在且有执行权限
+          if [ ! -f drivers/kernelsu/setup.sh ]; then
+            echo "❌ 错误: drivers/kernelsu/setup.sh 不存在！"
+            exit 1
+          fi
           
-          # 2. 确保内核配置中包含 KPROBES 相关选项 (集成脚本已做，但再次确认更稳妥)
+          # 执行集成脚本 (它会自动修改 Kconfig/Makefile 并应用必要补丁)
+          bash drivers/kernelsu/setup.sh
+          
+          # 可选：如果脚本执行后需要手动确认配置项，则补充到 defconfig 中
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
-          if ! grep -q "CONFIG_KPROBES=y" $DEFCONFIG; then
-            echo "CONFIG_KPROBES=y" >> $DEFCONFIG
-          fi
-          if ! grep -q "CONFIG_HAVE_KPROBES=y" $DEFCONFIG; then
-            echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
-          fi
-          if ! grep -q "CONFIG_KPROBE_EVENTS=y" $DEFCONFIG; then
-            echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
+          
+          # 确保必要的内核选项已开启 (KernelSU 依赖 KPROBES)
+          sed -i '/CONFIG_KPROBES/d' $DEFCONFIG
+          echo "CONFIG_KPROBES=y" >> $DEFCONFIG
+          echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
+          echo "CONFIG_KPROBE_EVENTS=y" >> $DEFCONFIG
+          
+          # KernelSU 的具体配置项可能是 CONFIG_KSU=y 或 CONFIG_KERNELSU=y
+          # 根据你的 setup.sh 实际写入的名称来决定 (常见为 CONFIG_KSU)
+          if ! grep -q "CONFIG_KSU" $DEFCONFIG; then
+            echo "CONFIG_KSU=y" >> $DEFCONFIG
           fi
           
-          echo "✅ KernelSU (v0.9.5) 源码及 KPROBES 集成配置已应用。"
+          echo "✅ KernelSU 集成完成"
       # 10. 配置内核基础参数（修改 defconfig）
       - name: 配置内核基础参数
         run: |

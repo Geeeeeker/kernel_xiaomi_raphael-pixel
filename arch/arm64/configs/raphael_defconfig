@@ -1,7 +1,15 @@
-# ====== 调度器调试选项（关闭以解决 entity_eligible 未定义错误） ======
+# ====== 调度器：禁用不稳定特性，规避函数缺失 ======
 # CONFIG_SCHED_DEBUG is not set
 # CONFIG_SCHED_WALT is not set
 # CONFIG_SCHED_TUNE is not set
+# CONFIG_UCLAMP_TASK is not set
+# CONFIG_UCLAMP_TASK_GROUP is not set
+CONFIG_SCHED_DEBUG=y
+
+# ====== 块层：禁用 mq-deadline（解决重定义），使用 BFQ ======
+# CONFIG_MQ_IOSCHED_DEADLINE is not set
+CONFIG_IOSCHED_BFQ=y
+CONFIG_BFQ_GROUP_IOSCHED=y
 
 CONFIG_ARM64_LSE_ATOMICS=y
 # CONFIG_CC_WERROR is not set

@@ -78,15 +78,7 @@ jobs:
           fi
           rm -rf rtl8188eus-repo
       # ========== 修复：注释掉 Btrfs 相关配置 ==========
-      - name: 禁用 Btrfs 支持
-        working-directory: kernel
-        run: |
-          sed -i '/^source "fs\/btrfs\/Kconfig"/s/^/# /' fs/Kconfig
-      # ========== 修复：注释 fair.c 中缺失的 se_update_runnable 调用 ==========
-      - name: 修复 fair.c 缺失的 se_update_runnable 调用
-        working-directory: kernel
-        run: |
-          sed -i '/se_update_runnable(se);/s/^/\/\//' kernel/sched/fair.c
+
       # ------------------------------------------------------------
       # 编译内核
       # ------------------------------------------------------------

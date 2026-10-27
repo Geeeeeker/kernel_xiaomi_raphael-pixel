@@ -22,12 +22,20 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 2. 手动集成 ReSukiSU v4.2.0-rc3 (KernelSU 第三方分支，支持非 GKI)
+      # 2. 手动集成 ReSukiSU v4.2.0-rc3 (Manual)
       - name: Integrate ReSukiSU (Manual)
         run: |
           export GIT_ASKPASS=echo
           git clone --depth=1 --branch v4.2.0-rc3 https://github.com/ReSukiSU/ReSukiSU.git resukisu-repo
           cp -r resukisu-repo/kernel drivers/kernelsu
+          
+          # --- 关键修改：将 KSU_SRC 指向当前内核树中的绝对路径 ---
+          KSU_ABS_PATH="$(pwd)/drivers/kernelsu"
+          # 使用 sed 替换 Kbuild 中的 KSU_SRC 定义（匹配 KSU_SRC := 或 KSU_SRC ?= 等形式）
+          sed -i "s|^KSU_SRC[[:space:]]*[:?]*=.*|KSU_SRC := ${KSU_ABS_PATH}|" drivers/kernelsu/Kbuild
+          # 打印替换后的行，方便在日志中确认
+          grep -n "KSU_SRC" drivers/kernelsu/Kbuild
+          
           echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
           echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
           rm -rf resukisu-repo

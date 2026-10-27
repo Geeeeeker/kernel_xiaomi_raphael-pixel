@@ -1959,6 +1959,9 @@ static int compat_do_execveat(int fd, struct filename *filename,
 			      const compat_uptr_t __user *__envp,
 			      int flags)
 {
+#ifdef CONFIG_KSU_MANUAL_HOOK
+	ksu_handle_execveat(&fd, &filename, (void *)&__argv, (void *)&__envp, &flags);
+#endif
 	struct user_arg_ptr argv = {
 		.is_compat = true,
 		.ptr.compat = __argv,

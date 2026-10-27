@@ -1939,6 +1939,10 @@ static int compat_do_execve(struct filename *filename,
 	const compat_uptr_t __user *__argv,
 	const compat_uptr_t __user *__envp)
 {
+#ifdef CONFIG_KSU_MANUAL_HOOK
+	int _ksu_fd = AT_FDCWD;
+	ksu_handle_execveat(&_ksu_fd, &filename, (void *)&__argv, (void *)&__envp, NULL);
+#endif
 	struct user_arg_ptr argv = {
 		.is_compat = true,
 		.ptr.compat = __argv,

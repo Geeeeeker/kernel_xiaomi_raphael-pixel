@@ -71,7 +71,10 @@
 #include "internal.h"
 
 #include <trace/events/sched.h>
-
+#ifdef CONFIG_KSU_MANUAL_HOOK
+extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr,
+                               void *argv, void *envp, int *flags);
+#endif
 int suid_dumpable = 0;
 
 static LIST_HEAD(formats);

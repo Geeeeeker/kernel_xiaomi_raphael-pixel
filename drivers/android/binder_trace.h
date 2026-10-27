@@ -10,10 +10,6 @@
 #define _BINDER_TRACE_H
 
 #include <linux/tracepoint.h>
-
-extern const char * const binder_command_strings[];
-extern const char * const binder_return_strings[];
-
 struct binder_buffer;
 struct binder_node;
 struct binder_proc;

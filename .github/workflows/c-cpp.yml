@@ -1,0 +1,40 @@
+# .github/workflows/sync-upstream.yml
+name: Sync with Evolution X Upstream
+
+on:
+  workflow_dispatch:                     # 允许你手动运行
+#  schedule:
+#    - cron: '0 0 * * *'                  # 可选，每天 UTC 00:00 自动运行
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 配置 Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: 创建临时工作目录
+        run: |
+          mkdir workspace
+          cd workspace
+          git init
+
+      - name: 添加上游和源仓库地址
+        run: |
+          cd workspace
+          git remote add upstream https://github.com/Evolution-X-Devices/kernel_xiaomi_raphael.git
+          git remote add origin https://x-access-token:${{ secrets.SYNC_PAT }}@github.com/Geeeeeker/kernel_xiaomi_raphael-pixel.git
+
+      - name: 拉取上游分支
+        run: |
+          cd workspace
+          # 浅克隆，只获取最新代码，避免仓库过大导致超时
+          git fetch --depth 1 upstream cnb
+
+      - name: 强制同步到你的分支
+        run: |
+          cd workspace
+          # 将上游的 cnb 分支强制推送到你仓库的同名分支
+          git push -f origin refs/remotes/upstream/cnb:refs/heads/cnb

@@ -14,32 +14,29 @@ jobs:
     env:
       KBUILD_BUILD_USER: NATO66613
       KBUILD_BUILD_HOST: KREMLIN
+      KSU_VARIANT: resukisu
+      KSU_REF: v4.2.0-rc3
 
     steps:
-      # 1. 检出仓库（内核源码位于根目录）
+      # 1. 检出仓库
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # 2. 手动集成 ReSukiSU v4.2.0-rc3 (Manual)
-      - name: Integrate ReSukiSU (Manual)
+      # 2. 使用官方脚本集成 ReSukiSU (Manual 方式)
+      - name: Integrate ReSukiSU (Manual via setup.sh)
         run: |
           export GIT_ASKPASS=echo
-          git clone --depth=1 --branch v4.2.0-rc3 https://github.com/ReSukiSU/ReSukiSU.git resukisu-repo
-          cp -r resukisu-repo/kernel drivers/kernelsu
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s "${KSU_REF}"
           
-          # --- 关键修改：将 KSU_SRC 指向当前内核树中的绝对路径 ---
-          KSU_ABS_PATH="$(pwd)/drivers/kernelsu"
-          # 使用 sed 替换 Kbuild 中的 KSU_SRC 定义（匹配 KSU_SRC := 或 KSU_SRC ?= 等形式）
-          sed -i "s|^KSU_SRC[[:space:]]*[:?]*=.*|KSU_SRC := ${KSU_ABS_PATH}|" drivers/kernelsu/Kbuild
-          # 打印替换后的行，方便在日志中确认
-          grep -n "KSU_SRC" drivers/kernelsu/Kbuild
-          
-          echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
-          echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
-          rm -rf resukisu-repo
-      # 3. 添加 rtl8188eus 无线网卡驱动（明确指定 master 分支）
+          # 验证安装结果：确保 drivers/kernelsu 是符号链接，而非普通目录
+          if [ ! -L drivers/kernelsu ]; then
+            echo "Error: drivers/kernelsu is not a symlink. setup.sh may have failed."
+            exit 1
+          fi
+          echo "ReSukiSU installed as symlink: $(readlink -f drivers/kernelsu)"
+      # 3. 添加 rtl8188eus 无线网卡驱动（保持不变）
       - name: Add rtl8188eus WiFi driver
         run: |
           export GIT_ASKPASS=echo
@@ -53,13 +50,13 @@ jobs:
             exit 1
           fi
           rm -rf rtl8188eus-repo
-      # 4. 设置 QEMU 用户态支持（用于运行 arm64 Docker 容器）
+      # 4. 设置 QEMU 用户态支持（保持不变）
       - name: 设置 QEMU 用户态支持
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user-static binfmt-support
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-      # 5. 设置 ccache
+      # 5. 设置 ccache（保持不变）
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -69,7 +66,7 @@ jobs:
             kernel-build-cache
           max-size: '10G'
 
-      # 6. 恢复 clang 工具链缓存
+      # 6. 恢复 clang 工具链缓存（保持不变）
       - name: Restore toolchain cache
         id: restore-clang
         uses: actions/cache/restore@v4
@@ -77,18 +74,18 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 7. 安装构建依赖
+      # 7. 安装构建依赖（保持不变）
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
           ccache --show-stats
-      # 8. 部署 clang 工具链（如果缓存未命中）
+      # 8. 部署 clang 工具链（如果缓存未命中）（保持不变）
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
-      # 9. 保存 clang 工具链缓存
+      # 9. 保存 clang 工具链缓存（保持不变）
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         id: cache-clang-save
@@ -101,7 +98,7 @@ jobs:
       - name: 配置内核基础参数
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
-          # 原有配置
+          # 原有配置（保持不变）
           echo "CONFIG_MODULES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -115,7 +112,7 @@ jobs:
           echo "CONFIG_BPF_JIT=y" >> $DEFCONFIG
           echo "# CONFIG_BPF_JIT_ALWAYS_ON is not set" >> $DEFCONFIG
           echo "CONFIG_BPF_SYSCALL=y" >> $DEFCONFIG
-          # 新增配置
+          # 新增配置（保持不变）
           echo "CONFIG_SYSVIPC=y" >> $DEFCONFIG
           echo "CONFIG_SYSVIPC_SYSCTL=y" >> $DEFCONFIG
           echo "CONFIG_SYSVIPC_COMPAT=y" >> $DEFCONFIG
@@ -127,28 +124,24 @@ jobs:
           echo "CONFIG_TMPFS=y" >> $DEFCONFIG
           echo "CONFIG_TMPFS_POSIX_ACL=y" >> $DEFCONFIG
           echo "CONFIG_TMPFS_XATTR=y" >> $DEFCONFIG
-          # USB/IP 配置
+          # USB/IP 配置（保持不变）
           echo "CONFIG_USBIP_CORE=m" >> $DEFCONFIG
           echo "CONFIG_USBIP_VHCI_HCD=m" >> $DEFCONFIG
           echo "CONFIG_USBIP_HOST=m" >> $DEFCONFIG
-          # 允许 section mismatch 警告而不中止编译
           echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y" >> $DEFCONFIG
-          # 添加 Backlight 支持（解决 undefined symbol 错误）
           echo "CONFIG_BACKLIGHT_CLASS_DEVICE=y" >> $DEFCONFIG
           echo "CONFIG_BACKLIGHT_QCOM=y" >> $DEFCONFIG
-          # 禁用模块版本控制（USB/IP 需要）
           echo "CONFIG_MODVERSIONS=n" >> $DEFCONFIG
-          # 开启 zstd 内存压缩（ZRAM 使用 zstd）
           echo "CONFIG_ZRAM=y" >> $DEFCONFIG
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
-          # 启用 ReSukiSU (KernelSU) + Manual Hook
+          # --- 启用 ReSukiSU (Manual Hook 模式) ---
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KSU_MANUAL_HOOK=y" >> $DEFCONFIG
-          # KPM 支持（ReSukiSU 新版本可能已移除，如编译报错可注释此行）
-          echo "CONFIG_KPM=y" >> $DEFCONFIG
+          # ReSukiSU 在 non-GKI 上需要完整的 kallsyms 表
           echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
+          # --- 结束 ReSukiSU 配置 ---
           # 启用 rtl8188eus WiFi 驱动（以模块形式编译）
           echo "CONFIG_RTL8188EU=m" >> $DEFCONFIG
           # 基础框架
@@ -162,7 +155,7 @@ jobs:
           echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
         shell: bash
 
-      # 11. 完整构建内核（使用 ccache）
+      # 11. 完整构建内核（使用 ccache）（保持不变）
       - name: Build the kernel with ccache
         run: |
           export CLANG_PATH=$HOME/r547379/bin
@@ -173,7 +166,7 @@ jobs:
           ccache --show-config
         shell: bash
 
-      # 12. 编译 USB/IP 内核模块（单独调用，确保生成 .ko）
+      # 12. 编译 USB/IP 内核模块（保持不变）
       - name: 编译 USB/IP 内核模块 (主机)
         run: |
           export CLANG_PATH=$HOME/r547379/bin
@@ -190,7 +183,7 @@ jobs:
           cp out/drivers/usb/usbip/*.ko $GITHUB_WORKSPACE/usbip-out/modules/
         shell: bash
 
-      # 13. 编译 USB/IP 用户态工具（Docker 容器，arm64 环境）
+      # 13. 编译 USB/IP 用户态工具（保持不变）
       - name: 编译 USB/IP 用户态工具 (Docker 容器)
         run: |
           mkdir -p usbip-out/{bin,libs}
@@ -250,20 +243,20 @@ jobs:
                 cp -P \"\$ld_linux\" libs/
               fi
             "
-      # 14. 打包 USB/IP 产物
+      # 14. 打包 USB/IP 产物（保持不变）
       - name: 打包 USB/IP 产物
         run: |
           cd usbip-out
           tar czf ../usbip-arm64-bundle.tar.gz .
           cd ..
-      # 15. 上传 USB/IP 捆绑包作为构建工件
+      # 15. 上传 USB/IP 捆绑包（保持不变）
       - name: 上传 USB/IP 捆绑包 (Artifact)
         uses: actions/upload-artifact@v4
         with:
           name: usbip-arm64-bundle
           path: usbip-arm64-bundle.tar.gz
 
-      # 16. 下载 BakaSU Manager APK（ReSukiSU 官方管理器分支）
+      # 16. 下载 BakaSU Manager APK（ReSukiSU 官方管理器）
       - name: Download BakaSU Manager APK
         run: |
           LATEST_URL=$(curl -s https://api.github.com/repos/Baka-SU/BakaSU/releases/latest \
@@ -276,7 +269,7 @@ jobs:
           fi
           mkdir -p $GITHUB_WORKSPACE/apk-output
           cp BakaSU-Manager.apk $GITHUB_WORKSPACE/apk-output/
-      # 17. 打包 AnyKernel3 内核安装包（并将 APK 一同打包）
+      # 17. 打包 AnyKernel3 内核安装包（保持不变）
       - name: Repack Kernel Artifacts
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
@@ -291,21 +284,21 @@ jobs:
           ls -lah $GITHUB_WORKSPACE/AnyKernel3
         shell: bash
 
-      # 18. 上传内核安装包作为构建工件
+      # 18. 上传内核安装包（保持不变）
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ github.workspace }}/AnyKernel3/
 
-      # 19. 上传 APK 单独作为构建工件
+      # 19. 上传 APK（保持不变）
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: BakaSU-Manager
           path: apk-output/BakaSU-Manager.apk
 
-      # 20. 发布到 GitHub Release（仅在推送 tag 时执行）
+      # 20. 发布到 GitHub Release（仅在推送 tag 时执行）（保持不变）
       - name: Create Release and Upload Artifacts
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1

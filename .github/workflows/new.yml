@@ -1,12 +1,17 @@
 name: Continues testing
 
 on:
-  push:
-    branches: [ "**" ]
-    tags:
-      - 'v*'
-  pull_request:
-    branches: [ "**" ]
+  workflow_dispatch:
+    inputs:
+      use_ccache:
+        description: '启用 ccache 加速（默认关闭，建议先关闭验证 binder 修复）'
+        type: boolean
+        default: false
+      release_tag:
+        description: '可选：填写标签名以创建 Release（如 v1.2.3，留空则不发布）'
+        type: string
+        required: false
+        default: ''
 
 jobs:
   build:
@@ -29,14 +34,14 @@ jobs:
         run: |
           export GIT_ASKPASS=echo
           curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s "${KSU_REF}"
-          
-          # 验证安装结果：确保 drivers/kernelsu 是符号链接，而非普通目录
+
           if [ ! -L drivers/kernelsu ]; then
             echo "Error: drivers/kernelsu is not a symlink. setup.sh may have failed."
             exit 1
           fi
           echo "ReSukiSU installed as symlink: $(readlink -f drivers/kernelsu)"
-      # 3. 添加 rtl8188eus 无线网卡驱动（保持不变）
+
+      # 3. 添加 rtl8188eus 无线网卡驱动
       - name: Add rtl8188eus WiFi driver
         run: |
           export GIT_ASKPASS=echo
@@ -50,14 +55,17 @@ jobs:
             exit 1
           fi
           rm -rf rtl8188eus-repo
-      # 4. 设置 QEMU 用户态支持（保持不变）
+
+      # 4. 设置 QEMU 用户态支持
       - name: 设置 QEMU 用户态支持
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user-static binfmt-support
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-      # 5. 设置 ccache（保持不变）
+
+      # 5. 设置 ccache（仅当 use_ccache=true 时启用）
       - name: Set up ccache
+        if: ${{ inputs.use_ccache }}
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           create-symlink: true
@@ -66,7 +74,7 @@ jobs:
             kernel-build-cache
           max-size: '10G'
 
-      # 6. 恢复 clang 工具链缓存（保持不变）
+      # 6. 恢复 clang 工具链缓存
       - name: Restore toolchain cache
         id: restore-clang
         uses: actions/cache/restore@v4
@@ -74,18 +82,22 @@ jobs:
           path: /home/runner/r547379
           key: clang-r547379
 
-      # 7. 安装构建依赖（保持不变）
+      # 7. 安装构建依赖
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex libelf-dev libncurses-dev libssl-dev unzip zip wget libarchive-tools
-          ccache --show-stats
-      # 8. 部署 clang 工具链（如果缓存未命中）（保持不变）
+          if [ "${{ inputs.use_ccache }}" = "true" ]; then
+            ccache --show-stats
+          fi
+
+      # 8. 部署 clang 工具链（如果缓存未命中）
       - name: Deploy Clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         run: |
           git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r547379.git /home/runner/r547379 --depth=1
-      # 9. 保存 clang 工具链缓存（保持不变）
+
+      # 9. 保存 clang 工具链缓存
       - name: Save clang
         if: steps.restore-clang.outputs.cache-hit != 'true'
         id: cache-clang-save
@@ -98,7 +110,6 @@ jobs:
       - name: 配置内核基础参数
         run: |
           DEFCONFIG="arch/arm64/configs/raphael_defconfig"
-          # 原有配置（保持不变）
           echo "CONFIG_MODULES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
           echo "CONFIG_HAVE_KPROBES=y" >> $DEFCONFIG
@@ -112,7 +123,6 @@ jobs:
           echo "CONFIG_BPF_JIT=y" >> $DEFCONFIG
           echo "# CONFIG_BPF_JIT_ALWAYS_ON is not set" >> $DEFCONFIG
           echo "CONFIG_BPF_SYSCALL=y" >> $DEFCONFIG
-          # 新增配置（保持不变）
           echo "CONFIG_SYSVIPC=y" >> $DEFCONFIG
           echo "CONFIG_SYSVIPC_SYSCTL=y" >> $DEFCONFIG
           echo "CONFIG_SYSVIPC_COMPAT=y" >> $DEFCONFIG
@@ -124,7 +134,6 @@ jobs:
           echo "CONFIG_TMPFS=y" >> $DEFCONFIG
           echo "CONFIG_TMPFS_POSIX_ACL=y" >> $DEFCONFIG
           echo "CONFIG_TMPFS_XATTR=y" >> $DEFCONFIG
-          # USB/IP 配置（保持不变）
           echo "CONFIG_USBIP_CORE=m" >> $DEFCONFIG
           echo "CONFIG_USBIP_VHCI_HCD=m" >> $DEFCONFIG
           echo "CONFIG_USBIP_HOST=m" >> $DEFCONFIG
@@ -135,50 +144,58 @@ jobs:
           echo "CONFIG_ZRAM=y" >> $DEFCONFIG
           echo "CONFIG_ZRAM_DEF_COMP_ZSTD=y" >> $DEFCONFIG
           echo "CONFIG_CRYPTO_ZSTD=y" >> $DEFCONFIG
-          # --- 启用 ReSukiSU (Manual Hook 模式) ---
+          # --- ReSukiSU (Manual Hook 模式) ---
           echo "CONFIG_KSU=y" >> $DEFCONFIG
           echo "CONFIG_KSU_MANUAL_HOOK=y" >> $DEFCONFIG
-          # ReSukiSU 在 non-GKI 上需要完整的 kallsyms 表
           echo "CONFIG_KALLSYMS=y" >> $DEFCONFIG
           echo "CONFIG_KALLSYMS_ALL=y" >> $DEFCONFIG
           # --- 结束 ReSukiSU 配置 ---
-          # 启用 rtl8188eus WiFi 驱动（以模块形式编译）
           echo "CONFIG_RTL8188EU=m" >> $DEFCONFIG
-          # 基础框架
           echo "CONFIG_USB_SERIAL=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_CONSOLE=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_GENERIC=y" >> $DEFCONFIG
-          # 核心四大金刚 (覆盖 95% 以上市售模块)
           echo "CONFIG_USB_SERIAL_CH341=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_FTDI_SIO=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_CP210X=y" >> $DEFCONFIG
           echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
         shell: bash
-        
+
+      # 11. 验证 binder.c 修改是否落地
       - name: Verify binder.c patch
         run: |
           echo "=== array definitions ==="
           grep -n "binder_return_strings\[\]\|binder_command_strings\[\]" drivers/android/binder.c
           echo "=== export macros ==="
           grep -n "EXPORT_SYMBOL_GPL(binder_" drivers/android/binder.c
-          
-      # 11. 完整构建内核（使用 ccache）（保持不变）
-      - name: Build the kernel with ccache
+
+      # 12. 完整构建内核（根据开关决定是否用 ccache，并强制重编 binder.o）
+      - name: Build the kernel
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
-          
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig O=out
-          
-          # 强制删除旧的 binder.o，确保它根据新源文件重新编译
+
+          if [ "${{ inputs.use_ccache }}" = "true" ]; then
+            export CC_CMD="ccache clang"
+            echo ">>> ccache 已启用"
+          else
+            export CC_CMD="clang"
+            echo ">>> ccache 已禁用"
+          fi
+
+          make LLVM=1 LLVM_IAS=1 CC="$CC_CMD" raphael_defconfig O=out
+
+          # 强制重编 binder.o，规避旧目标文件/ccache 干扰
           rm -f out/drivers/android/binder.o
-          
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo) O=out
-          ccache --show-stats
-          ccache --show-config
+
+          make LLVM=1 LLVM_IAS=1 CC="$CC_CMD" -j$(grep -c ^processor /proc/cpuinfo) O=out
+
+          if [ "${{ inputs.use_ccache }}" = "true" ]; then
+            ccache --show-stats
+            ccache --show-config
+          fi
         shell: bash
 
-      # 12. 编译 USB/IP 内核模块（保持不变）
+      # 13. 编译 USB/IP 内核模块
       - name: 编译 USB/IP 内核模块 (主机)
         run: |
           export CLANG_PATH=$HOME/r547379/bin
@@ -195,7 +212,7 @@ jobs:
           cp out/drivers/usb/usbip/*.ko $GITHUB_WORKSPACE/usbip-out/modules/
         shell: bash
 
-      # 13. 编译 USB/IP 用户态工具（保持不变）
+      # 14. 编译 USB/IP 用户态工具（Docker 容器）
       - name: 编译 USB/IP 用户态工具 (Docker 容器)
         run: |
           mkdir -p usbip-out/{bin,libs}
@@ -255,20 +272,22 @@ jobs:
                 cp -P \"\$ld_linux\" libs/
               fi
             "
-      # 14. 打包 USB/IP 产物（保持不变）
+
+      # 15. 打包 USB/IP 产物
       - name: 打包 USB/IP 产物
         run: |
           cd usbip-out
           tar czf ../usbip-arm64-bundle.tar.gz .
           cd ..
-      # 15. 上传 USB/IP 捆绑包（保持不变）
+
+      # 16. 上传 USB/IP 捆绑包
       - name: 上传 USB/IP 捆绑包 (Artifact)
         uses: actions/upload-artifact@v4
         with:
           name: usbip-arm64-bundle
           path: usbip-arm64-bundle.tar.gz
 
-      # 16. 下载 BakaSU Manager APK（ReSukiSU 官方管理器）
+      # 17. 下载 BakaSU Manager APK
       - name: Download BakaSU Manager APK
         run: |
           LATEST_URL=$(curl -s https://api.github.com/repos/Baka-SU/BakaSU/releases/latest \
@@ -281,7 +300,8 @@ jobs:
           fi
           mkdir -p $GITHUB_WORKSPACE/apk-output
           cp BakaSU-Manager.apk $GITHUB_WORKSPACE/apk-output/
-      # 17. 打包 AnyKernel3 内核安装包（保持不变）
+
+      # 18. 打包 AnyKernel3 内核安装包
       - name: Repack Kernel Artifacts
         run: |
           git clone --depth=1 https://github.com/SOVIET-ANDROID/AnyKernel3.git $HOME/AnyKernel3
@@ -296,27 +316,27 @@ jobs:
           ls -lah $GITHUB_WORKSPACE/AnyKernel3
         shell: bash
 
-      # 18. 上传内核安装包（保持不变）
+      # 19. 上传内核安装包
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ github.workspace }}/AnyKernel3/
 
-      # 19. 上传 APK（保持不变）
+      # 20. 上传 APK
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: BakaSU-Manager
           path: apk-output/BakaSU-Manager.apk
 
-      # 20. 发布到 GitHub Release（仅在推送 tag 时执行）（保持不变）
+      # 21. 可选发布到 GitHub Release（仅当填写了 release_tag）
       - name: Create Release and Upload Artifacts
-        if: startsWith(github.ref, 'refs/tags/')
+        if: ${{ inputs.release_tag != '' }}
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
+          tag_name: ${{ inputs.release_tag }}
+          name: Release ${{ inputs.release_tag }}
           draft: false
           prerelease: false
           files: |

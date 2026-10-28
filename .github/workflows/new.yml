@@ -176,18 +176,16 @@ jobs:
 
           if [ "${{ inputs.use_ccache }}" = "true" ]; then
             export CC_CMD="ccache clang"
-            echo ">>> ccache 已启用"
           else
             export CC_CMD="clang"
-            echo ">>> ccache 已禁用"
           fi
 
-          make LLVM=1 LLVM_IAS=1 CC="$CC_CMD" raphael_defconfig O=out
+          # 关键修改：添加 LD=ld.bfd，强制使用 GNU 链接器
+          make LLVM=1 LLVM_IAS=1 LD=ld.bfd CC="$CC_CMD" raphael_defconfig O=out
 
-          # 强制重编 binder.o，规避旧目标文件/ccache 干扰
           rm -f out/drivers/android/binder.o
 
-          make LLVM=1 LLVM_IAS=1 CC="$CC_CMD" -j$(grep -c ^processor /proc/cpuinfo) O=out
+          make LLVM=1 LLVM_IAS=1 LD=ld.bfd CC="$CC_CMD" -j$(grep -c ^processor /proc/cpuinfo) O=out
 
           if [ "${{ inputs.use_ccache }}" = "true" ]; then
             ccache --show-stats

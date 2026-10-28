@@ -97,7 +97,7 @@ jobs:
       # 10. 配置内核基础参数（修改 defconfig）
       - name: 配置内核基础参数
         run: |
-          DEFCONFIG="arch/arm64/configs/0raphael_defconfig"
+          DEFCONFIG="arch/arm64/configs/raphael_defconfig"
           # 原有配置（保持不变）
           echo "CONFIG_MODULES=y" >> $DEFCONFIG
           echo "CONFIG_KPROBES=y" >> $DEFCONFIG
@@ -160,7 +160,7 @@ jobs:
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
-          make LLVM=1 LLVM_IAS=1 CC="ccache clang" 0raphael_defconfig O=out
+          make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig O=out
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo) O=out
           ccache --show-stats
           ccache --show-config

@@ -167,7 +167,12 @@ jobs:
         run: |
           export CLANG_PATH=$HOME/r547379/bin
           export PATH=${CLANG_PATH}:${PATH}
+          
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" raphael_defconfig O=out
+          
+          # 强制删除旧的 binder.o，确保它根据新源文件重新编译
+          rm -f out/drivers/android/binder.o
+          
           make LLVM=1 LLVM_IAS=1 CC="ccache clang" -j$(grep -c ^processor /proc/cpuinfo) O=out
           ccache --show-stats
           ccache --show-config

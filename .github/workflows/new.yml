@@ -163,13 +163,6 @@ jobs:
           sed -i 's/static const char \* const binder_return_strings\[\]/const char * const binder_return_strings[]/' "$BINDER_C"
           sed -i 's/static const char \* const binder_command_strings\[\]/const char * const binder_command_strings[]/' "$BINDER_C"
 
-          # 2. 在文件末尾追加导出宏
-          cat >> "$BINDER_C" <<'EOF'
-
-          EXPORT_SYMBOL_GPL(binder_return_strings);
-          EXPORT_SYMBOL_GPL(binder_command_strings);
-          EOF
-
           echo "Patched $BINDER_C to export binder trace string arrays."
           
       # 11. 完整构建内核（使用 ccache）（保持不变）

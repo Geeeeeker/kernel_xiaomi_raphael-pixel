@@ -155,31 +155,22 @@ jobs:
           echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
         shell: bash
         
-      - name: Export Binder Symbols for ReSukiSU
+      - name: Patch Binder Symbols for ReSukiSU
         run: |
-          BINDER_MAKEFILE="drivers/android/Makefile"
-          
-          # 检查 Makefile 是否已存在，不存在则创建
-          touch "$BINDER_MAKEFILE"
-          
-          # 向 Makefile 追加编译标志，强制导出符号
-          # 使用 ccflags-y 可以确保这些符号在整个 binder 模块编译时生效
-          echo 'ccflags-y += -DEXPORT_SYMBOL_GPL_binder_command_strings' >> "$BINDER_MAKEFILE"
-          echo 'ccflags-y += -DEXPORT_SYMBOL_GPL_binder_return_strings' >> "$BINDER_MAKEFILE"
-          
-          # 同时，我们仍然需要修改源文件，移除 static 修饰符
           BINDER_C="drivers/android/binder.c"
+
+          # 1. 移除 static 修饰符，使数组成为全局符号
           sed -i 's/static const char \* const binder_return_strings\[\]/const char * const binder_return_strings[]/' "$BINDER_C"
           sed -i 's/static const char \* const binder_command_strings\[\]/const char * const binder_command_strings[]/' "$BINDER_C"
-          
-          # 在 binder.c 文件末尾添加导出宏（确保符号被导出）
+
+          # 2. 在文件末尾追加导出宏
           cat >> "$BINDER_C" <<'EOF'
 
           EXPORT_SYMBOL_GPL(binder_return_strings);
           EXPORT_SYMBOL_GPL(binder_command_strings);
           EOF
-          
-          echo "Binder symbols export patch applied."
+
+          echo "Patched $BINDER_C to export binder trace string arrays."
           
       # 11. 完整构建内核（使用 ccache）（保持不变）
       - name: Build the kernel with ccache

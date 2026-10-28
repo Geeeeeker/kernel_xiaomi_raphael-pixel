@@ -6777,7 +6777,7 @@ static void print_binder_proc(struct seq_file *m,
 		m->count = start_pos;
 }
 
-static const char * const binder_return_strings[] = {
+const char * const binder_return_strings[] = {
 	"BR_ERROR",
 	"BR_OK",
 	"BR_TRANSACTION",
@@ -6800,7 +6800,7 @@ static const char * const binder_return_strings[] = {
 	"BR_ONEWAY_SPAM_SUSPECT",
 };
 
-static const char * const binder_command_strings[] = {
+const char * const binder_command_strings[] = {
 	"BC_TRANSACTION",
 	"BC_REPLY",
 	"BC_ACQUIRE_RESULT",
@@ -7327,3 +7327,7 @@ device_initcall(binder_init);
 #include "binder_trace.h"
 
 MODULE_LICENSE("GPL v2");
+
+
+EXPORT_SYMBOL_GPL(binder_return_strings);
+EXPORT_SYMBOL_GPL(binder_command_strings);

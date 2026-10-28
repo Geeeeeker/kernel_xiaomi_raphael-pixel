@@ -167,7 +167,50 @@ jobs:
           grep -n "binder_return_strings\[\]\|binder_command_strings\[\]" drivers/android/binder.c
           echo "=== export macros ==="
           grep -n "EXPORT_SYMBOL_GPL(binder_" drivers/android/binder.c
+      - name: Fix VDSO build order in arm64 Makefile
+        run: |
+          python3 - <<'PY'
+          import re
+          makefile = 'arch/arm64/Makefile'
+          with open(makefile, 'r') as f:
+              content = f.read()
 
+          # 提取 vdso_prepare 块（可能包含多行）
+          vdso_prepare_pattern = re.compile(
+              r'(^vdso_prepare:.*(?:\n\t.*)*)', re.MULTILINE
+          )
+          vdso_prepare_match = vdso_prepare_pattern.search(content)
+          if not vdso_prepare_match:
+              print("vdso_prepare target not found, skipping.")
+              exit(0)
+
+          vdso_prepare_block = vdso_prepare_match.group(1)
+          # 从原位置移除
+          content = content.replace(vdso_prepare_block, '')
+
+          # 定位 vdso_install 的 PHONY 行，将 prepare 块插到它前面
+          phony_vdso_install = 'PHONY += vdso_install'
+          if phony_vdso_install in content:
+              content = content.replace(
+                  phony_vdso_install,
+                  vdso_prepare_block + '\n' + phony_vdso_install
+              )
+              print("Moved vdso_prepare before vdso_install.")
+          else:
+              # 退而求其次，插到 prepare 目标前
+              prepare_target = 'prepare: vdso_prepare'
+              if prepare_target in content:
+                  content = content.replace(
+                      prepare_target,
+                      vdso_prepare_block + '\n' + prepare_target
+                  )
+                  print("Moved vdso_prepare before 'prepare' target.")
+              else:
+                  print("Could not find insertion point, skipping.")
+
+          with open(makefile, 'w') as f:
+              f.write(content)
+          PY
       # 12. 完整构建内核（根据开关决定是否用 ccache，并强制重编 binder.o）
       - name: Build the kernel
         run: |

@@ -155,15 +155,12 @@ jobs:
           echo "CONFIG_USB_SERIAL_PL2303=y" >> $DEFCONFIG
         shell: bash
         
-      - name: Patch Binder Symbols for ReSukiSU
+      - name: Verify binder.c patch
         run: |
-          BINDER_C="drivers/android/binder.c"
-
-          # 1. 移除 static 修饰符，使数组成为全局符号
-          sed -i 's/static const char \* const binder_return_strings\[\]/const char * const binder_return_strings[]/' "$BINDER_C"
-          sed -i 's/static const char \* const binder_command_strings\[\]/const char * const binder_command_strings[]/' "$BINDER_C"
-
-          echo "Patched $BINDER_C to export binder trace string arrays."
+          echo "=== array definitions ==="
+          grep -n "binder_return_strings\[\]\|binder_command_strings\[\]" drivers/android/binder.c
+          echo "=== export macros ==="
+          grep -n "EXPORT_SYMBOL_GPL(binder_" drivers/android/binder.c
           
       # 11. 完整构建内核（使用 ccache）（保持不变）
       - name: Build the kernel with ccache

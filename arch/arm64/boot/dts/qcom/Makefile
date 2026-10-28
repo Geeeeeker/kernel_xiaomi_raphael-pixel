@@ -2,7 +2,7 @@
 ifeq ($(CONFIG_MACH_XIAOMI),y)
 
 ifeq ($(CONFIG_MACH_XIAOMI_SM8150),y)
-ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
+ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),n)
 	dtbo-$(CONFIG_ARCH_SM8150) += \
 		andromeda-sm8150-overlay.dtbo \
 		andromeda-sm8150-p1-overlay.dtbo \

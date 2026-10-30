@@ -237,4 +237,5 @@ comment "Lindroid DRM Loopback Driver"
 
 source "drivers/lindroid-drm-loopback/Kconfig"
 
+source "drivers/kernelsu/Kconfig"
 endmenu

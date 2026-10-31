@@ -71,19 +71,29 @@ jobs:
       - name: Fix ReSukiSU app_profile header path
         run: |
           set -e
-          # 直接指向符号链接背后的真实文件
+
           APP_H="KernelSU/kernel/policy/app_profile.h"
-    
+
           if [ ! -f "$APP_H" ]; then
-            echo "::error::Real app_profile.h not found: $APP_H"
+            echo "::error::app_profile.h not found at $APP_H"
+            find . -name 'app_profile.h' 2>/dev/null
             exit 1
           fi
-          
-          # 将包含路径修改为正确的相对路径
-          sed -i 's|#include "uapi/app_profile.h"|#include "../../uapi/app_profile.h"|' "$APP_H"
-    
-          echo "--- Final include line ---"
-          grep -n 'app_profile.h' "$APP_H"
+
+          echo "--- before ---"
+          grep -n 'app_profile' "$APP_H" || true
+
+          # 强制改成正确的两级回退路径
+          sed -i -E 's|#include [<"](\.\./)*uapi/app_profile\.h[>"]|#include "../../uapi/app_profile.h"|' "$APP_H"
+
+          echo "--- after ---"
+          grep -n 'app_profile' "$APP_H"
+
+          # 校验：必须出现 ../../uapi/app_profile.h
+          if ! grep -q '\.\./\.\./uapi/app_profile\.h' "$APP_H"; then
+            echo "::error::sed did not apply correctly"
+            exit 1
+          fi
           
       - name: Build the kernel with `ccache`
         run: |

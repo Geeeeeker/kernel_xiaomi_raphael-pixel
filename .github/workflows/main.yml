@@ -70,24 +70,29 @@ jobs:
 
       - name: Fix ReSukiSU app_profile header (direct include)
         run: |
-          # 直接使用相对仓库根目录的路径（根据你的日志，源码根就是 $GITHUB_WORKSPACE）
+          set -e
           APP_H="drivers/kernelsu/policy/app_profile.h"
-          UAPI_H="drivers/kernelsu/uapi/app_profile.h"
-      
-          if [ ! -f "$APP_H" ] || [ ! -f "$UAPI_H" ]; then
-            echo "::error::One or both files not found. Listing candidates:"
+          if [ ! -f "$APP_H" ]; then
+            echo "::error::policy/app_profile.h not found"
             find . -name 'app_profile.h' 2>/dev/null
             exit 1
           fi
+          
+             # 定位 uapi 版 app_profile.h（排除 policy 下的那个）
+          UAPI_H=$(find . -path '*/uapi/app_profile.h' 2>/dev/null | head -n 1)
+          if [ -z "$UAPI_H" ]; then
+            echo "::error::uapi/app_profile.h not found"
+            exit 1
+          fi
+          echo "uapi header: $UAPI_H"
       
-          # 1. 复制 uapi 头文件到 policy 同目录
-          cp "$UAPI_H" "$APP_H"
+          # 1. 复制到 policy 同目录
+          cp -f "$UAPI_H" "$APP_H"
       
-          # 2. 修改 include 为直接引用同目录文件
-          sed -i 's|#include "uapi/app_profile.h"|#include "app_profile.h"|' "$APP_H"
-          sed -i 's|#include "../uapi/app_profile.h"|#include "app_profile.h"|' "$APP_H"
+          # 2. 改成同目录直接引用
+          sed -i -E 's|#include [<"](\.\./)*uapi/app_profile\.h[>"]|#include "app_profile.h"|' "$APP_H"
       
-          echo "--- Final include line ---"
+          echo "--- final include ---"
           grep -n 'app_profile.h' "$APP_H"
       - name: Build the kernel with `ccache`
         run: |

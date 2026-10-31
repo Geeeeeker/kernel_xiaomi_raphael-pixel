@@ -29,18 +29,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      # 2. 使用官方脚本集成 ReSukiSU (Manual 方式)
-      - name: Integrate ReSukiSU (Manual via setup.sh)
-        run: |
-          export GIT_ASKPASS=echo
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash -s "${KSU_REF}"
-
-          if [ ! -L drivers/kernelsu ]; then
-            echo "Error: drivers/kernelsu is not a symlink. setup.sh may have failed."
-            exit 1
-          fi
-          echo "ReSukiSU installed as symlink: $(readlink -f drivers/kernelsu)"
-
       # 3. 添加 rtl8188eus 无线网卡驱动
       - name: Add rtl8188eus WiFi driver
         run: |

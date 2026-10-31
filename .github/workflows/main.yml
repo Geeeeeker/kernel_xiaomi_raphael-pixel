@@ -57,10 +57,16 @@ jobs:
       
       - name: Fix ReSukiSU uapi header path
         run: |
-         cd kernel_workspace/android-kernel
-         # 方法一的自动化版本：修改包含路径
-         sed -i 's|#include "uapi/app_profile.h"|#include <kernelsu/uapi/app_profile.h>|' \
-           drivers/kernelsu/policy/app_profile.h
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+          FILE=$(find "$GITHUB_WORKSPACE" -path '*/drivers/kernelsu/policy/app_profile.h' 2>/dev/null | head -n 1)
+          if [ -z "$FILE" ]; then
+            echo "::error::app_profile.h not found"
+            find "$GITHUB_WORKSPACE" -maxdepth 4 -type d -name kernelsu 2>/dev/null
+            exit 1
+          fi
+          echo "Patching: $FILE"
+          sed -i 's|#include "uapi/app_profile.h"|#include "../uapi/app_profile.h"|' "$FILE"
+          grep -n 'app_profile.h' "$FILE"
       
       - name: Build the kernel with `ccache`
         run: |

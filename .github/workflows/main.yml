@@ -54,7 +54,14 @@ jobs:
           
       - name: Setup ReSukiSU
         run: bash drivers/kernelsu/setup.sh
-  
+      
+      - name: Fix ReSukiSU uapi header path
+        run: |
+         cd kernel_workspace/android-kernel
+         # 方法一的自动化版本：修改包含路径
+         sed -i 's|#include "uapi/app_profile.h"|#include <kernelsu/uapi/app_profile.h>|' \
+           drivers/kernelsu/policy/app_profile.h
+      
       - name: Build the kernel with `ccache`
         run: |
           export CLANG_PATH=$HOME/r547379/bin

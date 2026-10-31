@@ -53,10 +53,8 @@ jobs:
           key: clang-r547379
           
       - name: Setup ReSukiSU
-        run: |
-          cd kernel_workspace/android-kernel
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
-    
+        run: bash drivers/kernelsu/setup.sh
+  
       - name: Build the kernel with `ccache`
         run: |
           export CLANG_PATH=$HOME/r547379/bin

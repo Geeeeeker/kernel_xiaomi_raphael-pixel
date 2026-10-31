@@ -439,7 +439,6 @@ SYSCALL_DEFINE2(newlstat, const char __user *, filename,
 
 	return cp_new_stat(&stat, statbuf);
 }
-#endif
 #if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)
 SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 		struct stat __user *, statbuf, int, flag)

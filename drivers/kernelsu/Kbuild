@@ -48,7 +48,6 @@ ccflags-y += -Wno-int-to-pointer-cast -Wno-declaration-after-statement
 ccflags-y += -I$(srctree)/security/selinux -I$(srctree)/security/selinux/include
 ccflags-y += -I$(srctree)/$(src) -I$(srctree)/$(src)/include
 ccflags-y += -I$(src) -I$(src)/include
-ccflags-y += -I$(src)/uapi
 
 obj-$(CONFIG_KSU) += kernelsu.o
 
